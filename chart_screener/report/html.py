@@ -193,7 +193,8 @@ def stock_payload(s: StockScan, rank: int) -> dict:
     df = ctx.df
     i0 = _window_start(s)
     w = df.iloc[i0:]
-    best = s.lead()
+    # 표시용 대표(보컬만 걸린 종목은 보컬) — 예전 StockScan 모양(display_lead 없음)도 그대로 그린다
+    best = s.display_lead() if hasattr(s, "display_lead") else s.lead()
     _, risk = s.entry_risk()
     pats = {}
     for name, r in s.results.items():
@@ -212,10 +213,10 @@ def stock_payload(s: StockScan, rank: int) -> dict:
         "close": _r(s.close), "chg": _r(s.change_pct, 4), "score": s.score.composite, "rs": _r(s.rs),
         "market_cap": _r(s.market_cap), "value_today": _r(s.value_today), "avg_value_20": _r(s.avg_value_20),
         "partial": s.partial,
-        "best": s.lead_name, "stage": best.stage if best else None,
+        "best": best.name if best else None, "stage": best.stage if best else None,
         "dist": _r(s.close / best.pivot - 1, 4) if best and best.pivot else None,
         "risk": _r(risk, 4),
-        "detected": [n for n in list(scoring.BASE_PATTERNS) + ["canslim", "pocket_pivot"]
+        "detected": [n for n in list(scoring.BASE_PATTERNS) + ["canslim", "pocket_pivot", "vocal"]
                      if n in s.results and s.results[n].detected],
         "bd": {"pattern_part": s.score.pattern_part, "tech_part": s.score.tech_part,
                "rs_part": s.score.rs_part, "notes": s.score.notes},

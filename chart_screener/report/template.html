@@ -352,6 +352,8 @@ function entryStop(s) {
     const hold = p.shares === 0 && ("cap" in p ? !p.cap : /관망|대기/.test(p.plan || ""));
     return { entry: p.entry, stop: p.stop, plan: p.plan, src: "scan", hold: hold ? (/대기/.test(p.plan || "") ? "대기" : "관망") : null };
   }
+  // 보컬은 관찰용(과거 검증 손실) — 대표로 보여도 매수 수량을 내지 않는다
+  if (s.best === "vocal") return { entry: null, stop: null, plan: "보컬 — 관찰용 칩 (과거 검증 346거래 승률 31% · 거래당 평균 −2.4%, 매수 계획을 내지 않음)", src: "pattern", hold: "관망" };
   const lp = s.best && s.patterns[s.best];
   if (lp && lp.pivot > 0 && lp.stop > 0) return { entry: Math.max(lp.pivot, s.close), stop: lp.stop, plan: p && p.plan, src: "pattern", hold: null };
   return p && p.plan ? { entry: null, stop: null, plan: p.plan, src: "scan", hold: null } : null;
@@ -506,7 +508,7 @@ function filtered() {
     (!state.q || s.name.toLowerCase().includes(state.q) || s.code.toLowerCase().includes(state.q)) &&
     (!state.stage || s.stage === state.stage) &&
     (!state.market || s.market === state.market) &&
-    (!state.act || s.stage === "breakout" || s.stage === "near_pivot") &&
+    (!state.act || (s.best !== "vocal" && (s.stage === "breakout" || s.stage === "near_pivot"))) &&
     [...state.pats].every((p) => s.detected.includes(p)));
 }
 const cand = grid($("#candTbl"), COLS, filtered, { key: "score", dir: -1 },
@@ -518,7 +520,7 @@ $("#tbody").addEventListener("click", (e) => { const tr = e.target.closest("tr")
 /* 필터 */
 const counts = {};
 STOCKS.forEach((s) => s.detected.forEach((n) => (counts[n] = (counts[n] || 0) + 1)));
-$("#chips").innerHTML = BASES.concat(["canslim", "pocket_pivot"]).filter((n) => counts[n]).map((n) =>
+$("#chips").innerHTML = BASES.concat(["canslim", "pocket_pivot", "vocal"]).filter((n) => counts[n]).map((n) =>
   `<button class="chip" data-p="${esc(n)}" aria-pressed="false">${esc(lbl(n))}<span class="c">${counts[n]}</span></button>`).join("");
 $("#chips").addEventListener("click", (e) => {
   const b = e.target.closest(".chip"); if (!b) return;

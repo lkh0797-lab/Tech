@@ -231,7 +231,11 @@ def cmd_backtest(a) -> int:
                         since=a.since, horizons=hz, stages=tuple(a.stages.split(",")),
                         history_days=_cfg_years(a).data.history_days if a.years else None)
     codes = [c for c in a.codes.split(",") if c] or None
-    ev = run_backtest(bt, workers=a.workers, codes=codes)
+    try:
+        ev = run_backtest(bt, workers=a.workers, codes=codes)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
     if ev.empty:
         print("신호 없음")
         return 0

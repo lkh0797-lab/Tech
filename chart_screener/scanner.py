@@ -67,6 +67,15 @@ class StockScan:
         r = self.lead()
         return r.name if r is not None else None
 
+    def display_lead(self) -> PatternResult | None:
+        """표시용 대표: lead(), 없으면 보컬(관찰용 — 점수 · 매수 계획 · 실시간 감시에는 쓰지 않는다).
+        주도주(베이스 없음)는 점수 · 일지가 주도주로 셈하므로 그대로 둔다."""
+        r = self.lead()
+        if r is not None or self.leader:
+            return r
+        v = self.results.get("vocal")
+        return v if v is not None and v.detected else None
+
     def entry_risk(self) -> tuple[float | None, float | None]:
         """(진입 기준가, 손절폭). 진입가 = max(피벗, 현재가): 돌파 전엔 피벗 매수, 돌파 후엔 현재가 매수.
         300억 장대양봉 눌림목(재돌파 전)은 min(현재가, 50%선 지정가) — scoring.planned_entry, position_plan 과 같은 값.
@@ -262,6 +271,41 @@ def _group_strength(ud: UniverseData, offline: bool, sector_map, verbose: bool):
         return None, None, None
 
 
+def _vocal_prepare(ud: UniverseData, cfg: Config, offline: bool, sector_map, verbose: bool):
+    """(테마 분류표, 보컬 단면 {code: 깔때기}, 못 셌을 때 이유) — 분류표가 없거나 실패하면 단면은 None."""
+    sm = sector_map
+    if sm is None:
+        try:
+            from .data.sector import load_sector_map
+            sm = load_sector_map(offline=offline)
+        except Exception as e:
+            if verbose:
+                print(f"  테마 분류표 생략: {type(e).__name__}: {e}", file=sys.stderr)
+            return None, None, f"보컬 판정 안 함 — 테마 분류표를 읽지 못했다({type(e).__name__})"
+    if sm is None or len(sm) == 0:
+        return sm, None, "보컬 판정 안 함 — 테마 분류표가 없다(온라인으로 한 번 scan 하면 받는다)"
+    try:
+        from .vocal import VocalConfig, prepare
+        vcfg = cfg.pattern_cfg("vocal", VocalConfig)
+        # 스캔 대상(120봉↑)보다 짧은 신규 상장(60봉↑)도 순위 · 테마 · 대장에는 넣는다(원본 보컬과 같게)
+        extra = {}
+        try:
+            from .data import OHLCVCache
+            cache = OHLCVCache()
+            for c in ud.universe.index:
+                if c not in ud.ohlcv:
+                    d = cache.load(c)
+                    if d is not None and vcfg.min_bars <= len(d) < cfg.data.min_history_days:
+                        extra[c] = d
+        except Exception:
+            extra = {}
+        return sm, prepare(ud, sm, vcfg, offline=offline, extra_ohlcv=extra), None
+    except Exception as e:
+        if verbose:
+            print(f"  보컬 단면 생략: {type(e).__name__}: {e}", file=sys.stderr)
+        return sm, None, f"보컬 판정 안 함 — 단면 계산 실패({type(e).__name__}: {e})"
+
+
 def run_scan(ud: UniverseData, cfg: Config | None = None, patterns: list[str] | None = None,
              include_all: bool = False, verbose: bool = True, *, offline: bool = True,
              sector_map: pd.DataFrame | None = None) -> ScanResult:
@@ -272,7 +316,15 @@ def run_scan(ud: UniverseData, cfg: Config | None = None, patterns: list[str] | 
     radar: list[dict] = []
     errors: dict[str, str] = {}
     ctxs = list(iter_contexts(ud, cfg, apply_filter=True))
+    vocal_res, vocal_skip = None, None
+    if patterns is None or "vocal" in patterns:
+        # 보컬은 거래대금 순위 · 테마 강도가 전 시장 단면이라 종목마다 따로 셀 수 없다 — 한 번 세어 넣는다
+        sector_map, vocal_res, vocal_skip = _vocal_prepare(ud, cfg, offline, sector_map, verbose)
     for k, ctx in enumerate(ctxs, 1):
+        if vocal_res is not None:
+            ctx.info["vocal"] = vocal_res.get(ctx.code)
+        elif vocal_skip:
+            ctx.info["vocal_skip"] = vocal_skip
         try:
             s = scan_one(ctx, patterns)
         except Exception as e:  # 한 종목 오류로 전체 스캔이 멈추지 않게
@@ -383,21 +435,22 @@ def to_frame(scan: ScanResult) -> pd.DataFrame:
     """요약 표 (CSV/엑셀 출력용). 후보가 없으면 열만 있는 빈 표."""
     rows = []
     for s in scan.stocks:
-        best = s.lead()
+        best = s.display_lead()
         _, risk = s.entry_risk()
         pos = s.position or {}
         g = s.groups or {}
         themes = [t[0] if isinstance(t, (list, tuple)) else str(t) for t in (g.get("themes") or [])][:3]
         label = best.label if best else (scoring.LEADER_TAG if s.leader else "")
+        observe = best is not None and best.name == "vocal"      # 보컬만 걸린 종목 — 관찰용(매수 계획 없음)
         row = {
             "종목코드": s.code, "종목명": s.name, "시장": s.market, "종가": s.close,
             "등락률": round(s.change_pct * 100, 2), "종합점수": s.score.composite, "배지": s.badge or "",
             "RS": s.rs, "대표패턴": label,
-            "단계": best.stage_label if best else "", "피벗": best.pivot if best else None,
+            "단계": ("관찰 · " if observe else "") + (best.stage_label if best else ""), "피벗": best.pivot if best else None,
             "피벗대비": round((s.close / best.pivot - 1) * 100, 2) if best and best.pivot else None,
             "손절가": best.stop if best else None,
             "손절폭%": round(risk * 100, 2) if risk is not None else None,
-            "진입계획": pos.get("plan", ""),
+            "진입계획": "보컬 관찰용 — 매수 계획 없음 (과거 검증 손실)" if observe else pos.get("plan", ""),
             "권장수량": pos.get("shares") if pos else None,
             "투입금액(만원)": _round(pos.get("amount"), 1e4) if pos else None,
             "최대손실(만원)": _round(pos.get("max_loss"), 1e4) if pos else None,

@@ -260,6 +260,9 @@ def _worker(args) -> list[dict]:
 def run_backtest(bt: BacktestConfig, workers: int | None = None, codes: list[str] | None = None) -> pd.DataFrame:
     if bt.pattern not in REGISTRY:
         raise ValueError(f"알 수 없는 패턴: {bt.pattern}")
+    if bt.pattern == "vocal":
+        raise ValueError("보컬은 날마다 전 시장 단면(거래대금 순위 · 테마 강도 · 대장)이 필요해 이 백테스트로는 잴 수 없다 — "
+                         "검증은 기업추적 도구/보컬_백테스트.py (README '보컬 눌림목' 참고)")
     ud = load_universe_data(_cfg(bt.history_days), offline=True, verbose=False)
     first = min(d.index[0] for d in ud.ohlcv.values())
     since = bt.since or str((first + pd.tseries.offsets.BDay(bt.min_bars)).date())

@@ -273,11 +273,14 @@ def is_leader(results: dict[str, PatternResult], rs: float | None = None, cfg: S
 
 
 def is_candidate(results: dict[str, PatternResult], rs: float | None = None) -> bool:
-    """리포트에 올릴 후보: 베이스 패턴 하나 이상, CAN SLIM 충족, 또는 주도주(베이스 없음)."""
+    """리포트에 올릴 후보: 베이스 패턴 하나 이상, CAN SLIM 충족, 보컬 깔때기, 또는 주도주(베이스 없음)."""
     if any(results.get(n) is not None and results[n].detected for n in BASE_PATTERNS):
         return True
     cs = results.get("canslim")
     if cs is not None and cs.detected:
+        return True
+    vc = results.get("vocal")          # 보컬 깔때기(관찰용 칩) — 종합 점수에는 넣지 않는다
+    if vc is not None and vc.detected:
         return True
     return is_leader(results, rs)
 
