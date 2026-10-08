@@ -3,3 +3,4 @@ numpy>=1.26
 requests>=2.31
 openpyxl>=3.1
 pytest>=8
+websockets>=12

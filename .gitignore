@@ -4,3 +4,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .claude/
+# 증권사 API 비밀값·토큰은 저장소 밖(~/KIS/config)에 둔다 — 실수로 복사해 와도 커밋되지 않게
+kis_devlp.yaml
+*token*.json
+*.token
+KIS[0-9]*
+.env
+chart_screener_holidays.json

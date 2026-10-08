@@ -7,6 +7,10 @@
     python -m chart_screener backtest vcp         # 워크포워드 신호 성과 검증
     python -m chart_screener track                # 스캔 일지(output/journal.csv) 후보의 사후 성과 집계
     python -m chart_screener update               # 데이터만 갱신
+    python -m chart_screener live                 # 실시간 감시: 후보 + 증권사(KIS)/네이버 시세 → 돌파·눌림·손절 알림
+    python -m chart_screener live --check         # 한국투자증권 연결 점검 (설정·토큰·현재가·개장일·웹소켓)
+
+live 는 조회 전용이다 — 주문(매수·매도) 기능이 없다.
 """
 from __future__ import annotations
 
@@ -284,6 +288,20 @@ def cmd_update(a) -> int:
     return 0 if ud.asof is not None else 1
 
 
+def cmd_live(a) -> int:
+    from .live import run
+    return run(a)
+
+
+LIVE_HELP = "실시간 감시 — 스캔 후보 + 증권사(한국투자증권)/네이버 시세 → 돌파·눌림·손절 알림 (조회 전용, 주문 없음)"
+LIVE_DESC = (
+    "스캔 후보 중 돌파·피벗 근접·300억 눌림목·돌파 전 관찰·돌파 매수 대기 종목(최대 40)을 실시간 시세로 감시해 "
+    "피벗 근접·돌파(하루 예상 거래량 배수 포함)·눌림 구간 진입·손절가 이탈을 알리고 output/live.html 대시보드를 갱신한다. "
+    "조회 전용: 주문(매수·매도) 기능이 없다. 장중 신호는 잠정이므로 종가로 확인할 것. "
+    "한국투자증권 설정: ~/KIS/config/kis_devlp.yaml (공식 샘플 양식)."
+)
+
+
 def main(argv: list[str] | None = None) -> int:
     _utf8()
     ap = argparse.ArgumentParser(prog="chart_screener", description="한국 주식 기술적 차트 패턴 발굴기")
@@ -352,6 +370,33 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--years", type=float, default=None,
                    help="일봉 이력 연수 (기본 3년, 최대 약 10년). 예: --years 10")
     s.set_defaults(fn=cmd_update)
+
+    s = sub.add_parser("live", help=LIVE_HELP, description=LIVE_DESC)
+    s.add_argument("--source", choices=["auto", "kis", "naver"], default="auto",
+                   help="시세 출처: auto(KIS 설정·토큰이 되면 KIS, 아니면 네이버) · kis(한국투자증권) · naver")
+    s.add_argument("--top", type=int, default=40, help="감시 종목 수 (KIS 실시간 구독 한도 40)")
+    s.add_argument("--codes", default="", help="꼭 감시할 종목코드 (쉼표 구분, 피벗이 있는 스캔 후보만)")
+    s.add_argument("--interval", type=float, default=None,
+                   help="조회 간격(초): 네이버 기본 10, KIS 웹소켓 실패 시 REST 조회 기본 15")
+    s.add_argument("--venue", choices=["krx", "total"], default="krx",
+                   help="KIS 체결 시장: krx(H0STCNT0) · total(KRX+NXT 통합, H0UNCNT0)")
+    s.add_argument("--near", type=float, default=1.0, help="피벗 근접 알림 기준 (%%, 기본 1)")
+    s.add_argument("--vol-mult", type=float, default=1.4,
+                   help="돌파 거래량 기준: 하루 예상 거래량 ÷ 50일 평균 (기본 1.4배)")
+    s.add_argument("--no-toast", action="store_true", help="윈도우 알림(토스트) 끄기")
+    s.add_argument("--beep", action="store_true", help="알림 때 소리")
+    s.add_argument("--no-open", action="store_true", help="대시보드를 브라우저로 열지 않음")
+    s.add_argument("--after-hours", action="store_true", help="장 시간(09:00~15:30) 밖에도 실행·계속")
+    s.add_argument("--offline", action="store_true", help="감시 목록 스캔을 캐시로만")
+    s.add_argument("--refresh-scan", action="store_true", help="감시 목록 스캔 전에 일봉을 새로 받음")
+    s.add_argument("--dash-every", type=float, default=3.0, help="대시보드 갱신 간격(초, 기본 3)")
+    s.add_argument("--config", default="",
+                   help="KIS 설정 파일 (기본 ~/KIS/config/kis_devlp.yaml, 환경변수 CHART_SCREENER_KIS_CONFIG)")
+    s.add_argument("--paper", action="store_true", help="모의투자 키·주소 사용 (paper_app·paper_sec, vps·vops)")
+    s.add_argument("--check", action="store_true", help="한국투자증권 연결 점검만 (설정 형식·토큰·현재가·개장일·웹소켓)")
+    s.add_argument("--check-code", default="005930", help="--check 에서 조회할 종목 (기본 005930)")
+    s.add_argument("--out", default="")
+    s.set_defaults(fn=cmd_live)
 
     a = ap.parse_args(argv)
     return a.fn(a)
