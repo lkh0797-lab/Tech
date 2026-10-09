@@ -139,7 +139,9 @@ def test_newly_listed_stock_has_no_older_part(tmp_path):
     fc, cache = FakeDaily(), H.HistCache(tmp_path / "cache")
     rec = bars(ALL[:300])                                        # 상장 후 300봉뿐 — 스캔 일봉이 전부
     r = H.fill(fc, [("000001", rec)], out_dir=tmp_path / "out", cache=cache, budget=60, today=date(2001, 3, 1))
-    assert r.written == 0 and r.skipped == 1 and not (tmp_path / "out" / "hist" / "000001.json").exists()
+    assert r.written == 1 and r.skipped == 1                     # 앞 구간은 없지만 스캔 일봉(상장 이후 전부)으로 파일은 씀
+    js = _hist(tmp_path)
+    assert js["from"] == "2000-01-03" and js["older"] == 0 and len(js["t"]) == 300 and js["complete"] is True
     n = len(fc.calls)
     H.fill(fc, [("000001", rec)], out_dir=tmp_path / "out", cache=cache, budget=60, today=date(2001, 3, 1))
     assert len(fc.calls) == n                                    # 앞 구간 없음도 기억한다

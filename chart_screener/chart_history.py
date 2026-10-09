@@ -275,7 +275,7 @@ class FillResult:
     calls: int = 0                   # 증권사 일봉 호출 수
     scaled: int = 0                  # 수정주가 어긋남을 비율로 맞춘 종목 수
     pending: int = 0                 # 시간 한도 · 연결 없음으로 못 채운 종목 수 (다음 스캔에서)
-    skipped: int = 0                 # 앞 구간이 없는 종목 (스캔 일봉이 상장 이후 전부)
+    skipped: int = 0                 # 앞 구간이 없는 종목 (스캔 일봉이 상장 이후 전부 — 파일은 스캔 일봉만으로 씀)
     errors: dict = field(default_factory=dict)
     stopped: str | None = None       # 치명 오류로 멈춘 사유
     secs: float = 0.0
@@ -351,9 +351,10 @@ def fill(client, items: Iterable[tuple[str, pd.DataFrame]], *, out_dir: Path | s
                 res.scaled += 1
         older = len(merged) - len(_clean(recent))
         if older <= 0:
+            # 앞 구간이 없다(상장이 스캔 일봉 창 안) — 그래도 파일은 쓴다: 저평가 비후보 차트는 리포트에 최근 약 250봉만
+            # 담기므로 스캔 일봉(상장 이후 전부)으로 늘려 그린다
             with lock:
                 res.skipped += 1
-            return
         _write(out / f"{code}.json", {"ver": 1, "code": code, "from": f"{merged.index[0]:%Y-%m-%d}", "older": int(older),
                                       "complete": bool(meta.get("complete")),      # 상장 첫날까지 받았나 (아니면 다음 스캔에서 이어 받음)
                                       "src": "한국투자증권 일봉(수정주가) + 스캔 일봉", **_js(merged)})
