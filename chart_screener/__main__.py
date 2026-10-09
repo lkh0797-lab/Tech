@@ -113,6 +113,25 @@ def _write_kis_snapshots(hub, out: Path) -> None:
         print("증권사 스냅샷: " + " · ".join(str(p) for p in paths))
 
 
+def _write_history(scan, hub, out: Path, a, tty: bool) -> None:
+    """리포트 옆 hist/<code>.json — 차트 '5년 · 10년 · 전체' 용 긴 일봉 이력 (증권사 일봉, 처음 한 번 받아 캐시).
+    리포트를 쓴 뒤라 오래 걸려도 리포트는 이미 볼 수 있다. --hist-budget 0 이면 끔."""
+    budget = float(getattr(a, "hist_budget", 0) or 0)
+    if budget <= 0 or a.offline:
+        return
+    try:
+        from . import chart_history as history
+        from .report.html import report_charts
+
+        items = [(c, s.ctx.df) for c, s in report_charts(scan, a.top)]
+        prog = (lambda i, n: print(f"\r  차트 긴 이력 {i}/{n}", end="" if i < n else "\n", file=sys.stderr, flush=True)) \
+            if tty else None
+        res = history.fill(hub.client if hub.on else None, items, out_dir=out, budget=budget, progress=prog)
+        print(res.summary_line())
+    except Exception as e:   # 이력 파일은 덧붙이는 기능 — 실패해도 스캔 결과는 그대로
+        print(f"차트 긴 이력 생략: {type(e).__name__}: {e}", file=sys.stderr)
+
+
 def cmd_scan(a) -> int:
     from . import journal, kis_scan, value_list
     from .patterns import REGISTRY
@@ -228,11 +247,13 @@ def cmd_scan(a) -> int:
 
     if table.empty:
         print("후보 없음")
-        return 0
-    cols = [c for c in ["종목코드", "종목명", "시장", "종가", "종합점수", "배지", "RS", "대표패턴", "단계", "피벗대비",
-                        "손절폭%", "권장수량", "진입계획"] if c in table.columns]
-    with pd.option_context("display.max_rows", 200, "display.width", 250, "display.unicode.east_asian_width", True):
-        print(table[cols].head(a.show).to_string(index=False))
+    else:
+        cols = [c for c in ["종목코드", "종목명", "시장", "종가", "종합점수", "배지", "RS", "대표패턴", "단계", "피벗대비",
+                            "손절폭%", "권장수량", "진입계획"] if c in table.columns]
+        with pd.option_context("display.max_rows", 200, "display.width", 250, "display.unicode.east_asian_width", True):
+            print(table[cols].head(a.show).to_string(index=False))
+    if not a.no_html:
+        _write_history(scan, hub, out, a, tty)      # 리포트 · 표를 낸 뒤 — 길어도 결과는 이미 나왔다
     return 0
 
 
@@ -385,6 +406,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--investor-top", type=int, default=60, help="기관·외국인 수급을 붙일 상위 후보 수 (0=끔)")
     s.add_argument("--out", default="")
     s.add_argument("--no-html", action="store_true")
+    s.add_argument("--hist-budget", type=float, default=0,
+                   help="차트 긴 이력(증권사 일봉, 상장 이후)을 받는 시간 한도(초). 처음엔 종목당 수십 번 호출 — "
+                        "다 못 받으면 다음 스캔에서 이어 받음. 기본 0(끔): 리포트를 파일로 열면 어차피 못 읽으므로, "
+                        "기업추적 뷰어가 '차트 발굴' 스캔에 600 을 붙인다"),
     s.add_argument("--fragment", action="store_true", help="HTML 조각으로 저장(Artifact 게시용)")
     s.add_argument("--open", action="store_true", help="완료 후 브라우저로 열기")
     s.add_argument("--account", type=float, default=None, help="계좌 규모(원), 포지션 수량 계산용 (기본 1억)")

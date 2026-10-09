@@ -314,6 +314,32 @@ def _value_row(r: dict, s: StockScan | None, skip: dict | None) -> dict:
     return row
 
 
+def _value_eligible(scan: ScanResult) -> list[dict]:
+    """비후보 '저평가' 등급 중 짧은 차트를 담을 수 있는 목록 행 (담는 순서대로 — 앞에서 MAX_VALUE_CHARTS 개까지).
+    탐지된 패턴이 있어야 하고(없으면 열 탭이 없다), 후보(상위 top 밖 포함)는 뺀다 — 짧은 '후보 아님' 차트로 그리면
+    매수 계획이 가려진다. 순서: Tech 패턴(정보 칩 '저평가 종목' 말고)이 걸린 종목 먼저, 그다음 저평가 점수순."""
+    vl = getattr(scan, "value", None)
+    if vl is None or not hasattr(vl, "rows"):
+        return []
+    scans = getattr(scan, "value_scans", None) or {}
+    cands = {s.code for s in scan.stocks}
+    eligible = [r for r in vl.rows if r.get("tier") == "저평가" and r["code"] not in cands
+                and (s := scans.get(r["code"])) is not None and s.ctx is not None
+                and any(x.detected for x in s.results.values())]
+    eligible.sort(key=lambda r: (not _value_pats(scans[r["code"]]),
+                                 -(r.get("score") if r.get("score") is not None else -1)))
+    return eligible
+
+
+def report_charts(scan: ScanResult, top: int = 150) -> list[tuple[str, StockScan]]:
+    """리포트에 차트를 담는 종목 [(code, StockScan)] — 후보 상위 top, 그다음 저평가 비후보 차트 (chart_history.fill 순서)."""
+    out = [(s.code, s) for s in scan.stocks if s.ctx is not None][:top]
+    have = {c for c, _ in out}
+    scans = getattr(scan, "value_scans", None) or {}
+    out += [(r["code"], scans[r["code"]]) for r in _value_eligible(scan)[:MAX_VALUE_CHARTS] if r["code"] not in have]
+    return out
+
+
 def _value(scan: ScanResult, listed: set[str]) -> tuple[dict | None, list[dict]]:
     """(저평가 탭 자료, 비후보 '저평가' 등급 종목의 짧은 차트 자료). 목록이 없으면 (None, [])."""
     vl = getattr(scan, "value", None)
@@ -322,14 +348,7 @@ def _value(scan: ScanResult, listed: set[str]) -> tuple[dict | None, list[dict]]
     scans = getattr(scan, "value_scans", None) or {}
     skipped = getattr(scan, "value_skipped", None) or {}
     cands = {s.code for s in scan.stocks}
-    # 비후보 '저평가' 등급 중 차트를 담을 종목: 탐지된 패턴이 있고(없으면 열 탭이 없다), 저평가 점수 높은 순 상한까지
-    # 후보(상위 top 밖 포함)는 뺀다 — 짧은 '후보 아님' 차트로 그리면 매수 계획이 가려진다
-    eligible = [r for r in vl.rows if r.get("tier") == "저평가" and r["code"] not in cands
-                and (s := scans.get(r["code"])) is not None and s.ctx is not None
-                and any(x.detected for x in s.results.values())]
-    # 상한 안 순서: Tech 패턴(정보 칩 '저평가 종목' 말고)이 걸린 종목 먼저, 그다음 저평가 점수순
-    eligible.sort(key=lambda r: (not _value_pats(scans[r["code"]]),
-                                 -(r.get("score") if r.get("score") is not None else -1)))
+    eligible = _value_eligible(scan)
     eligible_codes = {r["code"] for r in eligible}
     chart_codes = {r["code"] for r in eligible[:MAX_VALUE_CHARTS]}
     rows, charts = [], []

@@ -35,7 +35,8 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(-
 button, input, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+/* 머리글은 따라오지 않는다 — 목록 아래 차트로 내려가면 화면 높이를 차트가 다 쓰게 (시장 상태 · 증권사 줄이 두세 줄이라 높다) */
+header.top { position: static; background: var(--surface); border-bottom: 1px solid var(--line); }
 .top-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 10px 16px; }
 .brand { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
 .brand h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
@@ -58,8 +59,8 @@ svg.spark { flex: none; overflow: visible; display: block; }
 .rs-line { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .rs-dot { fill: var(--muted); } .rs-dot.hi { fill: var(--good); }
 
-main { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 16px; padding: 16px; align-items: start; }
-@media (max-width: 1080px) { main { grid-template-columns: minmax(0, 1fr); } }
+/* 목록(위) · 차트(아래)를 한 줄씩 전체 폭으로 — 차트를 크고 넓게 보기 위함 */
+main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 16px; align-items: start; }
 
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); min-width: 0; }
 .views { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line); overflow-x: auto; }
@@ -87,8 +88,8 @@ main { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); g
 .ranges .chip:disabled { opacity: .4; cursor: default; }
 .ranges .rsep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
 
-.tbl-wrap { overflow: auto; max-height: calc(100vh - var(--hdr) - 270px); min-height: 240px; }
-@media (max-width: 1080px) { .tbl-wrap { max-height: 60vh; min-height: 0; } }
+.tbl-wrap { overflow: auto; max-height: min(44vh, 560px); min-height: 200px; }
+@media (max-width: 1080px) { .tbl-wrap { max-height: 50vh; min-height: 0; } }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
 th { position: sticky; top: 0; background: var(--surface); color: var(--muted); font-weight: 500; font-size: 12px; cursor: pointer; user-select: none; z-index: 1; }
@@ -155,8 +156,8 @@ details.drop summary { padding: 10px 12px; cursor: pointer; font-size: 13px; col
 details.drop[open] summary { border-bottom: 1px solid var(--line); }
 details.drop .tbl-wrap { max-height: 40vh; min-height: 0; }
 
-.detail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--hdr) + 14px); }
-@media (max-width: 1080px) { .detail { position: static; } }
+#listPanel, .detail { scroll-margin-top: 10px; }
+.d-head .tolist { margin-left: auto; align-self: center; font-size: 12px; padding: 2px 10px; }
 .d-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 14px 16px 10px; }
 .d-head h2 { margin: 0; font-size: 20px; letter-spacing: -.01em; text-wrap: balance; }
 .d-head .px { font-size: 18px; font-weight: 500; }
@@ -169,8 +170,9 @@ details.drop .tbl-wrap { max-height: 40vh; min-height: 0; }
 .tab[aria-selected=true] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
 .tab .s { font-family: var(--font-data); font-size: 11px; margin-left: 4px; }
 .tab.off { opacity: .55; }
-#chart { height: 420px; }
-@media (max-width: 600px) { #chart { height: 320px; } }
+#chart { height: clamp(360px, calc(100vh - 260px), 900px); }   /* 차트로 내려오면 화면을 거의 채운다 (뷰어 iframe 640px 에서도 시간축까지) */
+@media (max-width: 600px) { #chart { height: 340px; } }
+.ranges .hnote { margin-left: auto; align-self: center; font-size: 11.5px; color: var(--muted); }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 16px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); }
 .legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 5px; }
 .d-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0; border-top: 1px solid var(--line); }
@@ -303,11 +305,12 @@ footer p { margin: 0 0 4px; }
   </div>
 
   <div class="panel detail" id="detail">
-    <div class="empty" id="noSel">왼쪽 목록에서 종목을 선택하면 차트와 판정 근거가 표시됩니다.</div>
+    <div class="empty" id="noSel">위 목록에서 종목을 선택하면 차트와 판정 근거가 표시됩니다.</div>
     <div id="dWrap" hidden>
       <div class="d-head">
         <h2 id="dName"></h2>
         <span class="px num" id="dPx"></span>
+        <button class="chip tolist" id="toList" type="button" title="목록으로 올라가기">목록 ↑</button>
         <span class="meta" id="dMeta"></span>
         <div class="d-tags" id="dTags"></div>
       </div>
@@ -377,6 +380,7 @@ const VSTOCKS = DATA.value_stocks || [];   // 저평가 탭: 후보가 아닌 '�
 const byCode = Object.fromEntries(VSTOCKS.concat(STOCKS).map((s) => [s.code, s]));
 const INFO = new Set(DATA.info_patterns || []);
 const narrow = () => window.matchMedia("(max-width: 1080px)").matches;
+const smooth = () => (window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
 
 const state = { q: "", stage: "", market: "", act: false, pats: new Set(), sel: null, tab: null, view: "cand" };
 
@@ -716,9 +720,9 @@ if (VALUE) {
   $("#nVAll").textContent = V.length;
   const nSkip = V.filter((r) => r.skip).length;
   $("#vSrc").textContent = `${VALUE.source || "기업추적 저평가"} · ${VALUE.date || "-"} 기준` + (nSkip ? ` · 패턴 미판정 ${nSkip}` : "");
-  $("#vFoot").textContent = `행을 누르면 차트가 열립니다 (후보는 전체 이력, 후보가 아닌 저평가 등급은 최근 약 ${VALUE.chart_bars || 250}봉 — ` +
+  $("#vFoot").textContent = `행을 누르면 차트가 열립니다 (리포트에는 후보 약 3년, 후보가 아닌 저평가 등급은 최근 약 ${VALUE.chart_bars || 250}봉 — ` +
     `Tech 패턴이 걸린 종목 먼저, 저평가 점수순 상한까지). 그 밖(관찰 등급 · 상한 밖 · 미판정)은 미니차트(최근 ${VALUE.spark_bars || 120}봉 종가)만 — 리포트 크기. ` +
-    `차트 없는 행에 마우스를 올리면 이유가 보입니다.`;
+    `차트 없는 행에 마우스를 올리면 이유가 보입니다. 뷰어에서 열면 차트는 상장 이후 전체 이력까지 불러옵니다.`;
   const PORDER = BASES.concat(DATA.chip_patterns || []).filter((n) => !INFO.has(n));
   const inScope = () => V.filter((r) => vs.scope === "all" || r.tier === "저평가");
   const tierPill = (r) => `<span class="pill ${r.tier === "저평가" ? "tier-v" : "tier-o"}" title="${esc((r.why || []).join(" · ") || "기업추적 등급")}">${esc(r.tier || "-")}</span>`;
@@ -820,10 +824,7 @@ function select(code, reveal = false) {
   if (g && g.themes_other && g.themes_other.length)
     tags.push(`<span class="tags" title="강도 순위 밖 소속 테마">${g.themes_other.slice(0, 5).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</span>`);
   $("#dTags").innerHTML = tags.join("");
-  $("#dBreak").textContent = s.vonly
-    ? `저평가 목록 종목 — 후보 아님 (관찰용 · 매수 계획 없음). 차트는 최근 약 ${s.ohlcv.t.length}봉, 탭은 탐지된 패턴만.`
-    : `종합 ${s.score.toFixed(1)} = 패턴 ${s.bd.pattern_part} × 0.5 + 기술체력 ${s.bd.tech_part} × 0.3 + RS ${s.bd.rs_part} × 0.2` +
-      (s.bd.notes.length ? ` · ${s.bd.notes.join(", ")}` : "");
+  $("#dBreak").textContent = breakText(s);
   const order = s.detected.concat(Object.keys(s.patterns).filter((n) => !s.detected.includes(n)));
   state.tab = s.best || s.detected.find((n) => !INFO.has(n)) || s.detected[0] || order[0];
   $("#dTabs").innerHTML = order.map((n) => {
@@ -835,8 +836,21 @@ function select(code, reveal = false) {
   renderKis(s);
   showPattern(state.tab);
   rsSpark(s);
-  if (reveal && narrow()) $("#detail").scrollIntoView({ block: "start" });
+  if (reveal) {   // 차트가 화면 아래쪽(거의 안 보임)에 있으면 차트까지 내린다 — 목록으로는 '목록 ↑'
+    const top = $("#detail").getBoundingClientRect().top;
+    if (top > window.innerHeight * 0.6) scrollDocTo($("#detail"));
+  }
+  loadHist(code);
 }
+function breakText(s) {
+  if (!s.vonly) return `종합 ${s.score.toFixed(1)} = 패턴 ${s.bd.pattern_part} × 0.5 + 기술체력 ${s.bd.tech_part} × 0.3 + RS ${s.bd.rs_part} × 0.2` +
+    (s.bd.notes.length ? ` · ${s.bd.notes.join(", ")}` : "");
+  const span = HIST.get(s.code) === "ok" ? `${dstr(s.ohlcv.t[0])}부터 긴 이력` : `최근 약 ${s.ohlcv.t.length}봉`;
+  return `저평가 목록 종목 — 후보 아님 (관찰용 · 매수 계획 없음). 차트는 ${span}, 탭은 탐지된 패턴만.`;
+}
+// scrollIntoView 는 뷰어(iframe 바깥) 페이지까지 밀어 기업추적 탭 줄이 가려진다 — 이 창만 움직인다
+const scrollDocTo = (el) => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 10, behavior: smooth() });
+$("#toList").addEventListener("click", () => scrollDocTo($("#listPanel")));
 $("#dTabs").addEventListener("click", (e) => {
   const b = e.target.closest(".tab"); if (!b) return;
   state.tab = b.dataset.p;
@@ -1014,7 +1028,8 @@ function renderRanges() {
     `<button class="chip rng" data-r="${k}" aria-pressed="${k === chartRange}"${b > 0 && b > have + 40 ? " disabled" : ""}>${l}</button>`).join("") +
     `<span class="rsep" aria-hidden="true"></span>` +
     `<button class="chip scl" data-s="log" aria-pressed="${logScale}" title="로그 가격축: 같은 등락률이 같은 높이">로그</button>` +
-    `<button class="chip scl" data-s="lin" aria-pressed="${!logScale}">일반</button>`;
+    `<button class="chip scl" data-s="lin" aria-pressed="${!logScale}">일반</button>` +
+    `<span class="hnote num" id="hNote">${esc(histNote())}</span>`;
 }
 $("#ranges").addEventListener("click", (e) => {
   const sb = e.target.closest(".scl");
@@ -1032,14 +1047,14 @@ $("#ranges").addEventListener("click", (e) => {
 });
 function applyRange() {
   if (!chart || !lastView) return;
-  const { t, p, first } = lastView, last = t[t.length - 1];
+  const { t, p, first, rep } = lastView, last = t[t.length - 1];
   const bars = (RANGES.find((r) => r[0] === chartRange) || RANGES[3])[2];
   if (bars === -1) {  // 패턴 구간: 패턴 시작 25봉 전부터
     const from = p.start_date && p.start_date > first ? p.start_date : null;
     if (from) {
       const i0 = Math.max(0, t.findIndex((d) => d >= from) - 25);
       chart.timeScale().setVisibleRange({ from: t[i0], to: last });
-    } else chart.timeScale().fitContent();
+    } else chart.timeScale().setVisibleRange({ from: rep || first, to: last });   // 시작일 없는 패턴: 리포트에 담긴 기간
   } else if (bars === 0 || bars >= t.length) {
     chart.timeScale().fitContent();
   } else {
@@ -1064,7 +1079,8 @@ function drawChart(s, p) {
     layout: { background: { type: "solid", color: css("--surface") }, textColor: css("--muted"), fontFamily: css("--font-data") },
     grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
     rightPriceScale: { borderColor: css("--line"), scaleMargins: { top: 0.06, bottom: 0.24 }, mode: scaleMode() },
-    timeScale: { borderColor: css("--line"), rightOffset: 4 },
+    // minBarSpacing: 기본 0.5px 이면 폭 1,100px 에 약 2,200봉(9년)까지만 들어가 '전체'(상장 이후 수천 봉)가 잘린다
+    timeScale: { borderColor: css("--line"), rightOffset: 4, minBarSpacing: 0.02 },
     crosshair: { mode: 0 },
     localization: { priceFormatter: (x) => Math.round(x).toLocaleString("ko-KR"), dateFormat: "yyyy-MM-dd" },
   });
@@ -1106,9 +1122,62 @@ function drawChart(s, p) {
   });
   markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
   candle.setMarkers(markers);
-  lastView = { t, p, first };
+  lastView = { t, p, first, rep: s.repFirst ? dstr(s.repFirst) : first };
   renderRanges();
   applyRange();
+}
+
+/* ---------- 긴 이력: 리포트 옆 hist/<code>.json (증권사 일봉 · 상장 이후, 뷰어에서 열 때) ----------
+   리포트에는 최근 이력(후보 약 3년 · 저평가 비후보 약 1년)만 담고, 종목을 열면 이 파일을 불러와 그 앞을 덧붙인다.
+   파일이 없거나(아직 못 받음 · 증권사 연결 없음) 파일로 직접 연 리포트면 담긴 기간만. 이동평균은 늘린 이력으로 다시 계산 */
+const HIST = new Map();   // code → "loading" | "ok" | "none"
+const HIST_MISS = new Map();   // code → 못 찾은 시각 — 스캔이 이력을 이어 받는 중일 수 있어 1분 뒤 다시 본다
+const HIST_FULL = new Map();   // code → 상장 첫날까지 받은 이력인가 (아니면 다음 스캔에서 이어 받는 중)
+const FILE_PAGE = location.protocol === "file:";   // 파일로 연 리포트는 브라우저가 옆 파일 읽기를 막는다
+function smaArr(c, n) {
+  const out = new Array(c.length).fill(null);
+  let sum = 0, cnt = 0;
+  for (let i = 0; i < c.length; i++) {
+    if (isNum(c[i])) { sum += c[i]; cnt++; }
+    if (i >= n && isNum(c[i - n])) { sum -= c[i - n]; cnt--; }
+    if (i >= n - 1 && cnt === n) out[i] = Math.round((sum / n) * 100) / 100;
+  }
+  return out;
+}
+function histNote() {
+  const s = state.sel && byCode[state.sel];
+  if (!s || !s.ohlcv || !s.ohlcv.t.length) return "";
+  const st = HIST.get(s.code), from = dstr(s.ohlcv.t[0]);
+  if (st === "loading") return `${from}부터 · 전체 이력 불러오는 중…`;
+  if (st === "ok") return HIST_FULL.get(s.code) ? `${from}부터 (상장 이후 · 증권사 일봉)`
+    : `${from}부터 · 증권사 일봉 (더 앞 구간은 다음 스캔에서 이어 받음)`;
+  if (FILE_PAGE) return `${from}부터 · 파일로 연 리포트는 담긴 기간만 — 상장 이후 전체는 기업추적 뷰어 '차트 발굴' 탭에서`;
+  return `${from}부터 · 이 리포트에 담긴 기간`;
+}
+async function loadHist(code) {
+  if (HIST.get(code) === "none" && Date.now() - (HIST_MISS.get(code) || 0) > 60000) HIST.delete(code);
+  if (HIST.has(code)) return;
+  if (FILE_PAGE) { HIST.set(code, "none"); return; }
+  HIST.set(code, "loading");
+  if (state.sel === code) renderRanges();
+  let h = null;
+  try {
+    const r = await fetch(`hist/${encodeURIComponent(code)}.json?d=${encodeURIComponent(DATA.generated_at || "")}`);
+    if (r.ok) h = await r.json();
+  } catch (e) { h = null; }   // 파일로 연 리포트(file://)는 막힘 — 담긴 기간만
+  const s = byCode[code], K = ["t", "o", "h", "l", "c", "v"];
+  const ok = !!(s && h && K.every((k) => Array.isArray(h[k]) && h[k].length === h.t.length) && h.t.length);
+  // 이 리포트에 담긴 첫날이 파일에 같은 가격으로 있어야 앞을 덧붙인다 — 리포트를 쓴 뒤 이력 파일이 아직 옛 수정주가
+  // 기준이면(스캔이 그 종목을 다시 받기 전) 이음매에 절벽이 생기므로 쓰지 않고 1분 뒤 다시 본다
+  const o = s && s.ohlcv, n = ok ? h.t.indexOf(o.t[0]) : -1;
+  const same = n > 0 && isNum(h.c[n]) && isNum(o.c[0]) && o.c[0] > 0 && Math.abs(h.c[n] / o.c[0] - 1) <= 0.005;
+  if (!ok || !same) { HIST.set(code, "none"); HIST_MISS.set(code, Date.now()); if (state.sel === code) renderRanges(); return; }
+  if (!s.repFirst) s.repFirst = o.t[0];
+  s.ohlcv = Object.fromEntries(K.map((k) => [k, h[k].slice(0, n).concat(o[k])]));
+  s.ma = { sma50: smaArr(s.ohlcv.c, 50), sma150: smaArr(s.ohlcv.c, 150), sma200: smaArr(s.ohlcv.c, 200) };
+  HIST_FULL.set(code, h.complete === true);
+  HIST.set(code, "ok");
+  if (state.sel === code) { $("#dBreak").textContent = breakText(s); showPattern(state.tab); }
 }
 
 /* RS선 미니 차트: 색은 CSS 클래스(변수) → 테마가 바뀌어도 자동 반영 */
