@@ -51,6 +51,12 @@ BASE_PATTERNS = (
 )
 SIGNAL_PATTERNS = ("pocket_pivot",)
 CONTEXT_PATTERNS = ("trend_template", "canslim")
+# 관찰 전용 — 종합 점수 · 매수 계획 · 실시간 감시에 쓰지 않는다. 보컬만 혼자서 후보가 될 수 있고(관찰 칩),
+# 바닥 투매 흡수(absorb) · 바닥 탈출(stage2)은 다른 이유로 후보가 된 종목에 태그 · 상세 탭으로만 붙는다.
+OBSERVE_PATTERNS = ("vocal", "absorb", "stage2")
+# 외부 목록 정보 칩 (관찰용) — 기업추적 저평가 목록(value_list). 차트 패턴이 아니며 점수 · 매수 계획에 쓰지 않고
+# 혼자서 후보가 되지 않는다. 후보 목록 칩 순서: … CAN SLIM · 포켓 피벗 · 보컬 · 저평가 종목 · 바닥 투매 흡수 · 바닥 탈출.
+INFO_PATTERNS = ("undervalued",)
 
 STAGE_WEIGHT = {BREAKOUT: 1.0, NEAR_PIVOT: 0.95, FORMING: 0.7, EXTENDED: 0.45, FAILED: 0.15, None: 0.6}
 ACTIONABLE = (BREAKOUT, NEAR_PIVOT)
@@ -273,7 +279,9 @@ def is_leader(results: dict[str, PatternResult], rs: float | None = None, cfg: S
 
 
 def is_candidate(results: dict[str, PatternResult], rs: float | None = None) -> bool:
-    """리포트에 올릴 후보: 베이스 패턴 하나 이상, CAN SLIM 충족, 보컬 깔때기, 또는 주도주(베이스 없음)."""
+    """리포트에 올릴 후보: 베이스 패턴 하나 이상, CAN SLIM 충족, 보컬 깔때기, 또는 주도주(베이스 없음).
+    바닥 투매 흡수(absorb) · 바닥 탈출(stage2)은 관찰 전용이라 혼자서는 후보가 되지 않는다 (OBSERVE_PATTERNS).
+    저평가 종목(undervalued, INFO_PATTERNS)도 외부 목록 정보 칩이라 후보를 만들지 않는다."""
     if any(results.get(n) is not None and results[n].detected for n in BASE_PATTERNS):
         return True
     cs = results.get("canslim")

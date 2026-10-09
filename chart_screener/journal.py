@@ -130,16 +130,20 @@ def annotate(scan, path: str | Path | None = None, journal: pd.DataFrame | None 
         s.badge = badge_for(s.prev_stage, stage, p is not None)
         if s.badge:
             summary[s.badge].append(s)
+    # 증권사 상태(관리종목 등)로 이번에 뺀 후보 — 사유를 붙여 탈락 표에 함께 남긴다
+    excluded = {d["code"]: d for d in getattr(scan, "excluded", None) or [] if isinstance(d, dict) and d.get("code")}
     dropped = []
     for p in prev.itertuples(index=False):
         if p.code in now_codes:
             continue
         dropped.append({"code": p.code, "name": p.name, "market": getattr(p, "market", ""),
                         "pattern": p.pattern or None, "stage": p.stage or None,
-                        "composite": _f(p.composite), "close": _f(p.close), "asof": prev_asof})
+                        "composite": _f(p.composite), "close": _f(p.close), "asof": prev_asof,
+                        "reason": (excluded.get(p.code) or {}).get("reason")})
     dropped.sort(key=lambda d: -(d["composite"] or 0))
-    scan.dropped = dropped
     summary["탈락"] = dropped
+    seen = {d["code"] for d in dropped}
+    scan.dropped = dropped + [d for c, d in excluded.items() if c not in seen]
     return summary
 
 

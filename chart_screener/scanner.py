@@ -20,9 +20,10 @@ from .config import Config
 from .data import now_kst
 from .patterns import REGISTRY, PatternResult, StockContext, run_all
 from .patterns.base import FAILED
-from .universe_data import UniverseData, iter_contexts
+from .universe_data import UniverseData, iter_contexts, passes_universe_filter
 
 TOP_GROUPS = 15
+EXCLUDE_TAGS = {"거래정지", "정리매매", "관리종목", "투자위험"}   # 증권사 상태 태그 중 후보 제외 사유 (kis_market.status_exclude)
 
 
 @dataclass
@@ -46,6 +47,9 @@ class StockScan:
     prev_stage: str | None = None      # 직전 스캔의 대표 단계 (journal)
     groups: dict | None = None         # sector.stock_groups() 결과
     leader: bool = False               # 주도주(베이스 없음)
+    kst: list = field(default_factory=list)   # 증권사(KIS) 종목 상태 태그: 관리종목 · 투자경고 · 단기과열 …
+    kis: dict | None = None            # 증권사 목표가 · 투자의견 · 추정실적 요약 (kis_scan.stock_kis)
+    thin: str | None = None            # 저평가 목록 종목이 유동성 문턱 밑이라 '패턴만' 잰 경우 그 사유(후보 · 레이더에는 안 넣는다)
 
     @property
     def actionable(self) -> bool:
@@ -109,7 +113,13 @@ class ScanResult:
     breadth: dict | None = None                         # UniverseData.breadth (시장 폭)
     prev_asof: str | None = None                        # 비교한 직전 스캔 기준일 (journal)
     account: dict = field(default_factory=lambda: _account(Config()))
-    dropped: list[dict] = field(default_factory=list)   # 직전 스캔 후보 중 이번에 빠진 종목 (journal)
+    dropped: list[dict] = field(default_factory=list)   # 직전 스캔 후보 중 이번에 빠진 종목 (journal) + 상태 제외(reason)
+    excluded: list[dict] = field(default_factory=list)  # 증권사 상태(거래정지 · 정리매매 · 관리종목 · 투자위험)로 뺀 후보
+    kis: dict | None = None                             # 증권사 자료 요약 (kis_scan.KISScan.report_info) — 없으면 네이버만
+    value: object | None = None                         # 기업추적 저평가 목록 (value_list.ValueList) — 없으면 탭 · 칩 없음
+    value_scans: dict = field(default_factory=dict)     # {code: StockScan} 목록 종목 중 분석한 것 (후보 아니어도, ctx 유지)
+    value_skipped: dict = field(default_factory=dict)   # {code: value_list.skipped_entry} 분석 대상 밖 목록 종목
+    include_all: bool = False                           # run_scan(include_all=True) — 후보 조건 없이 전부 담은 스캔
 
 
 # ---------------------------------------------------------------- 포지션 계획
@@ -271,7 +281,7 @@ def _group_strength(ud: UniverseData, offline: bool, sector_map, verbose: bool):
         return None, None, None
 
 
-def _vocal_prepare(ud: UniverseData, cfg: Config, offline: bool, sector_map, verbose: bool):
+def _vocal_prepare(ud: UniverseData, cfg: Config, offline: bool, sector_map, verbose: bool, kis=None):
     """(테마 분류표, 보컬 단면 {code: 깔때기}, 못 셌을 때 이유) — 분류표가 없거나 실패하면 단면은 None."""
     sm = sector_map
     if sm is None:
@@ -299,6 +309,12 @@ def _vocal_prepare(ud: UniverseData, cfg: Config, offline: bool, sector_map, ver
                         extra[c] = d
         except Exception:
             extra = {}
+        if extra and kis is not None and hasattr(kis, "turnover_for"):
+            # 스캔 대상 일봉은 prepare 단계에서 KIS 실제 거래대금으로 바뀌었다 — 순위 단면이 섞이지 않게 신규 상장도 같게
+            try:
+                extra = kis.turnover_for(extra)
+            except Exception:
+                pass
         return sm, prepare(ud, sm, vcfg, offline=offline, extra_ohlcv=extra), None
     except Exception as e:
         if verbose:
@@ -306,21 +322,52 @@ def _vocal_prepare(ud: UniverseData, cfg: Config, offline: bool, sector_map, ver
         return sm, None, f"보컬 판정 안 함 — 단면 계산 실패({type(e).__name__}: {e})"
 
 
+def excluded_entry(s: StockScan, why: str) -> dict:
+    """증권사 상태로 후보에서 뺀 종목 → ScanResult.dropped 행 (리포트 '탈락' 표와 같은 모양, reason 있음)."""
+    r = s.display_lead()
+    return {"code": s.code, "name": s.name, "market": s.market, "pattern": r.name if r is not None else None,
+            "stage": r.stage if r is not None else None, "composite": s.score.composite, "close": s.close,
+            "reason": f"증권사 상태 제외: {why}"}
+
+
 def run_scan(ud: UniverseData, cfg: Config | None = None, patterns: list[str] | None = None,
              include_all: bool = False, verbose: bool = True, *, offline: bool = True,
-             sector_map: pd.DataFrame | None = None) -> ScanResult:
-    """전 종목 스캔. offline=False 면 업종·테마 지도가 없거나 오래됐을 때 새로 받는다(기본은 캐시만)."""
+             sector_map: pd.DataFrame | None = None, kis=None, value=None) -> ScanResult:
+    """전 종목 스캔. offline=False 면 업종·테마 지도가 없거나 오래됐을 때 새로 받는다(기본은 캐시만).
+
+    kis(kis_scan.KISScan, 상태를 받은 것)가 있으면 종목마다 상태 태그(StockScan.kst)를 붙이고, 후보가 될 종목 중
+    거래정지 · 정리매매 · 관리종목 · 투자위험은 후보에서 빼 ScanResult.excluded · dropped 에 사유와 함께 남긴다.
+
+    value(value_list.ValueList, 기업추적 저평가 목록)가 있으면 종목마다 ctx.info["undervalued"] 에 목록 행(없으면 None)을
+    넣고('저평가 종목' 정보 칩), 목록 종목은 후보가 아니어도 결과를 ScanResult.value_scans 에 남긴다(ctx 유지 — 리포트
+    '저평가 종목' 탭의 패턴 · 미니차트 · 짧은 차트). 분석 대상 밖 목록 종목은 value_skipped 에 사유 · 종가만."""
     cfg = cfg or Config()
     t0 = time.perf_counter()
     out: list[StockScan] = []
     radar: list[dict] = []
+    excluded: list[dict] = []
     errors: dict[str, str] = {}
-    ctxs = list(iter_contexts(ud, cfg, apply_filter=True))
+    # 저평가 목록 종목은 유동성 문턱(20일 평균 거래대금 · 주가 · 시총) 밑이어도 패턴은 잰다 — 저평가 종목은 소형주가 많아
+    # 문턱으로 자르면 등급 종목의 ⅓이 '패턴 미판정'이 된다(2026-10-08: 127곳 중 44곳). 후보 · 300억 레이더에는 넣지 않는다.
+    vcodes = set(value.codes()) if value is not None and hasattr(value, "codes") else set()
+    ctxs, thin = [], {}
+    for ctx in iter_contexts(ud, cfg, apply_filter=False):
+        ok, why = passes_universe_filter(ctx)
+        if ok:
+            ctxs.append(ctx)
+        elif ctx.code in vcodes:
+            thin[ctx.code] = " · ".join(why)
+            ctxs.append(ctx)
+    n_filtered = len(ctxs) - len(thin)
     vocal_res, vocal_skip = None, None
     if patterns is None or "vocal" in patterns:
         # 보컬은 거래대금 순위 · 테마 강도가 전 시장 단면이라 종목마다 따로 셀 수 없다 — 한 번 세어 넣는다
-        sector_map, vocal_res, vocal_skip = _vocal_prepare(ud, cfg, offline, sector_map, verbose)
+        sector_map, vocal_res, vocal_skip = _vocal_prepare(ud, cfg, offline, sector_map, verbose, kis)
+    value_scans: dict[str, StockScan] = {}
     for k, ctx in enumerate(ctxs, 1):
+        vrow = value.get(ctx.code) if value is not None else None
+        if value is not None:
+            ctx.info["undervalued"] = vrow          # 'value' 키는 당일 거래대금 — 다른 키를 쓴다
         if vocal_res is not None:
             ctx.info["vocal"] = vocal_res.get(ctx.code)
         elif vocal_skip:
@@ -334,24 +381,38 @@ def run_scan(ud: UniverseData, cfg: Config | None = None, patterns: list[str] | 
             for w in r.warnings:
                 if w.startswith("탐지 오류"):
                     errors[f"{ctx.code}:{name}"] = w
+        low = ctx.code in thin
+        if low:
+            s.thin = thin[ctx.code]
         try:
-            rd = radar_entry(ctx, s)
+            rd = None if low else radar_entry(ctx, s)
         except Exception as e:
             rd = None
             errors[f"{ctx.code}:radar"] = f"{type(e).__name__}: {e}"
         if rd is not None:
             radar.append(rd)
-        if include_all or scoring.is_candidate(s.results, s.rs):
-            out.append(s)
-        else:
+        if kis is not None:
+            s.kst = kis.tags(ctx.code)
+        why = kis.exclude(ctx.code) if kis is not None else None
+        keep = vrow is not None                     # 저평가 목록 종목은 후보가 아니어도 ctx 를 남긴다
+        if not low and (include_all or scoring.is_candidate(s.results, s.rs)):
+            if why and not include_all:
+                excluded.append(excluded_entry(s, why))
+                s.ctx = s.ctx if keep else None
+            else:
+                out.append(s)
+        elif not keep:
             s.ctx = None
+        if keep:
+            value_scans[ctx.code] = s
         if verbose and (k % 50 == 0 or k == len(ctxs)):
             print(f"\r  패턴 분석 {k}/{len(ctxs)}", end="" if k < len(ctxs) else "\n", file=sys.stderr, flush=True)
 
     sm, strength, stock_groups = _group_strength(ud, offline, sector_map, verbose)
     top_groups: list[dict] = []
     if strength is not None:
-        for s in out:
+        ids = {id(s) for s in out}
+        for s in out + [v for v in value_scans.values() if id(v) not in ids and v.ctx is not None]:
             try:
                 s.groups = stock_groups(s.code, sm, strength)
             except Exception:
@@ -366,21 +427,86 @@ def run_scan(ud: UniverseData, cfg: Config | None = None, patterns: list[str] | 
             rd["themes"] = themes.get(rd["code"], [])
     radar.sort(key=lambda d: (d["days_ago"], -d["value"]))
     out.sort(key=lambda s: -s.score.composite)
+    excluded.sort(key=lambda d: -(d["composite"] or 0))
     return ScanResult(
         asof=ud.asof, generated_at=pd.Timestamp(now_kst().replace(tzinfo=None)),
-        market=ud.market, stocks=out, scanned=len(ctxs), elapsed=time.perf_counter() - t0,
+        market=ud.market, stocks=out, scanned=n_filtered, elapsed=time.perf_counter() - t0,
         patterns=list(patterns or REGISTRY), errors=errors, radar=radar, groups=top_groups,
         breadth=getattr(ud, "breadth", None) or None, account=_account(cfg),
+        dropped=list(excluded), excluded=excluded,
+        value=value, value_scans=value_scans, value_skipped=_value_skipped(value, value_scans, ud, cfg, errors, kis),
+        include_all=include_all,
     )
 
 
-def enrich_investor(scan: ScanResult, top: int = 60, offline: bool = False, verbose: bool = True) -> int:
-    """상위 후보에만 기관·외국인 순매매를 붙이고 CAN SLIM(I)·종합점수를 다시 계산. 반환: 붙인 종목 수."""
+def refilter_candidates(scan: ScanResult) -> tuple[int, int]:
+    """수급(KIS · 네이버)을 붙여 CAN SLIM 을 다시 계산한 뒤 후보 목록을 다시 맞춘다. 반환 (뺀 수, 더한 수).
+
+    - 후보였는데 이제 어떤 후보 조건도 못 채우면(CAN SLIM 만으로 들어왔다가 I 가 낮아진 경우 등) 빼서
+      '탈락'(dropped)에 사유와 함께 남긴다.
+    - 후보가 아니던 저평가 목록 종목이 이제 후보 조건을 채우면 더한다 (증권사 상태 제외 · 유동성 문턱 밑은 빼고).
+    include_all 스캔은 건드리지 않는다."""
+    if scan.include_all:
+        return 0, 0
+    removed = []
+    for s in list(scan.stocks):
+        if not scoring.is_candidate(s.results, s.rs):
+            scan.stocks.remove(s)
+            removed.append(s)
+    excluded = {d.get("code") for d in scan.excluded}
+    have = {s.code for s in scan.stocks}
+    added = [s for c, s in scan.value_scans.items()
+             if c not in have and c not in excluded and s.ctx is not None and not getattr(s, "thin", None)
+             and not EXCLUDE_TAGS & set(getattr(s, "kst", None) or [])
+             and s not in removed and scoring.is_candidate(s.results, s.rs)]
+    scan.stocks.extend(added)
+    for s in removed:
+        r = s.display_lead()
+        row = {"code": s.code, "name": s.name, "market": s.market, "pattern": r.name if r is not None else "canslim",
+               "stage": r.stage if r is not None else None, "composite": s.score.composite,
+               "close": s.close, "reason": "수급 반영 뒤 후보 조건 미충족 (CAN SLIM 재계산)"}
+        scan.dropped.append(row)
+        scan.excluded.append(row)     # 일지 비교(journal.annotate)가 dropped 를 다시 만들 때 사유를 여기서 찾는다
+        if s.code not in scan.value_scans:
+            s.ctx = None
+    scan.stocks.sort(key=lambda s: -s.score.composite)
+    return len(removed), len(added)
+
+
+def _value_skipped(value, scans: dict, ud: UniverseData, cfg: Config, errors: dict, kis) -> dict:
+    """분석하지 못한 저평가 목록 종목 → {code: value_list.skipped_entry} (유동성 필터 · 기간 부족 · 분석 오류)."""
+    if value is None:
+        return {}
+    from .value_list import skipped_entry
+    out = {}
+    for code in value.codes():
+        if code not in scans:
+            why = f"분석 오류: {errors[code]}" if code in errors else None
+            out[code] = skipped_entry(code, ud, cfg, why, kis)
+    return out
+
+
+def recalc_canslim(s: StockScan) -> None:
+    """수급(ctx.info['investor'])이 바뀐 뒤 CAN SLIM(I)·종합점수를 다시 계산. 실패하면 경고만 남긴다."""
+    cs = REGISTRY.get("canslim")
+    if cs is None or "canslim" not in s.results or s.ctx is None:
+        return
+    try:
+        s.results["canslim"] = cs[1](s.ctx)
+        rescore(s)
+    except Exception as e:
+        s.results["canslim"].warnings.append(f"수급 반영 재계산 실패: {type(e).__name__}: {e}")
+
+
+def enrich_investor(scan: ScanResult, top: int = 60, offline: bool = False, verbose: bool = True,
+                    only_missing: bool = False) -> int:
+    """상위 후보에만 기관·외국인 순매매(네이버)를 붙이고 CAN SLIM(I)·종합점수를 다시 계산. 반환: 붙인 종목 수.
+    only_missing=True 면 이미 수급이 붙은 종목(증권사 자료)은 건너뛴다 — KIS 실패 종목의 대체용."""
     from .data.investor import attach_investor
 
-    cs = REGISTRY.get("canslim")
     done = 0
-    targets = [s for s in scan.stocks[:top] if s.ctx is not None]
+    targets = [s for s in scan.stocks[:top] if s.ctx is not None
+               and not (only_missing and s.ctx.info.get("investor") is not None)]
     for k, s in enumerate(targets, 1):
         try:
             got = attach_investor(s.ctx, offline=offline)
@@ -388,12 +514,7 @@ def enrich_investor(scan: ScanResult, top: int = 60, offline: bool = False, verb
             got = None
         if got is not None:
             done += 1
-            if cs is not None and "canslim" in s.results:
-                try:
-                    s.results["canslim"] = cs[1](s.ctx)
-                    rescore(s)
-                except Exception as e:
-                    s.results["canslim"].warnings.append(f"수급 반영 재계산 실패: {type(e).__name__}: {e}")
+            recalc_canslim(s)
         if verbose and (k % 10 == 0 or k == len(targets)):
             print(f"\r  수급(기관·외국인) {k}/{len(targets)}", end="" if k < len(targets) else "\n",
                   file=sys.stderr, flush=True)
@@ -401,9 +522,29 @@ def enrich_investor(scan: ScanResult, top: int = 60, offline: bool = False, verb
     return done
 
 
+def _kis_flow_summary(fl, inv, days: int) -> dict | None:
+    """증권사(KIS) 수급 → 최근 n일 기관·외국인 순매수 금액(원, 체결 금액 합 — 주식수 × 종가 근사가 아님)."""
+    n = min(days, len(fl.dates))
+    if n == 0:
+        return None
+    s = lambda xs: float(sum(x for x in xs[-n:] if x is not None)) * 1e8  # noqa: E731  (억원 → 원)
+    fr = None
+    if inv is not None and "foreign_ratio" in inv and len(inv):
+        v = inv["foreign_ratio"].iloc[-1]
+        fr = float(v) if v == v else None
+    d = str(fl.dates[-1])
+    return {"days": n, "asof": f"{d[:4]}-{d[4:6]}-{d[6:]}", "inst": s(fl.orgn), "foreign": s(fl.frgn),
+            "foreign_ratio": fr, "src": "KIS"}
+
+
 def investor_summary(s: StockScan, days: int = 20) -> dict | None:
-    """최근 n일 기관·외국인 순매수 금액(원, 순매매 주식수 × 종가 근사)."""
-    inv = s.ctx.info.get("investor") if s.ctx is not None else None
+    """최근 n일 기관·외국인 순매수 금액(원). 증권사 수급(ctx.info['kis_flows'])이 있으면 그 체결 금액 합,
+    없으면 순매매 주식수 × 종가 근사(네이버)."""
+    info = s.ctx.info if s.ctx is not None else {}
+    inv = info.get("investor")
+    fl = info.get("kis_flows")
+    if fl is not None and getattr(fl, "dates", None):
+        return _kis_flow_summary(fl, inv, days)
     if inv is None or len(inv) == 0:
         return None
     t = inv.iloc[-days:]
@@ -412,6 +553,7 @@ def investor_summary(s: StockScan, days: int = 20) -> dict | None:
         "days": int(len(t)), "asof": f"{t.index[-1]:%Y-%m-%d}",
         "inst": float((t["inst_net"] * px).sum()), "foreign": float((t["foreign_net"] * px).sum()),
         "foreign_ratio": float(t["foreign_ratio"].iloc[-1]) if "foreign_ratio" in t else None,
+        "src": "네이버",
     }
 
 
@@ -420,6 +562,7 @@ FRAME_COLUMNS = [
     "종목코드", "종목명", "시장", "종가", "등락률", "종합점수", "배지", "RS", "대표패턴", "단계", "피벗", "피벗대비",
     "손절가", "손절폭%", "진입계획", "권장수량", "투입금액(만원)", "최대손실(만원)", "업종", "테마", "탐지패턴",
     "20일평균거래대금(억)", "당일거래대금(억)", "시가총액(억)", "기관20일순매수(억)", "외국인20일순매수(억)",
+    "관찰패턴", "종목상태", "목표가괴리%", "목표가상향30일", "EPS(E)성장%",
 ]
 
 
@@ -463,6 +606,13 @@ def to_frame(scan: ScanResult) -> pd.DataFrame:
         inv = investor_summary(s)
         row["기관20일순매수(억)"] = round(inv["inst"] / 1e8, 1) if inv else None
         row["외국인20일순매수(억)"] = round(inv["foreign"] / 1e8, 1) if inv else None
+        k = s.kis or {}
+        row["관찰패턴"] = ", ".join(REGISTRY[n][0] for n in scoring.OBSERVE_PATTERNS + scoring.INFO_PATTERNS
+                                 if n in s.results and s.results[n].detected and n in REGISTRY)
+        row["종목상태"] = ", ".join(s.kst or [])
+        row["목표가괴리%"] = k.get("tp_gap")
+        row["목표가상향30일"] = k.get("tp_up30")
+        row["EPS(E)성장%"] = k.get("fwd_eps_g")
         for name, r in s.results.items():
             row[f"{name}_점수"] = round(r.score, 1) if r.detected else None
         rows.append(row)

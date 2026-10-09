@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
+from typing import Callable
 
 import pandas as pd
 
@@ -71,7 +72,12 @@ def _progress(i: int, n: int) -> None:
 
 
 def load_universe_data(cfg: Config | None = None, *, refresh: bool = False, offline: bool = False,
-                       codes: list[str] | None = None, verbose: bool = True) -> UniverseData:
+                       codes: list[str] | None = None, verbose: bool = True,
+                       prepare: Callable[[pd.DataFrame, dict], dict] | None = None) -> UniverseData:
+    """종목 목록 · 일봉 · 지수 · RS · 시장 폭 · 시장 방향을 한 번에 적재.
+
+    prepare(universe, ohlcv) -> ohlcv 는 일봉을 받은 직후, RS · 시장 폭을 세기 전에 한 번 불린다
+    (예: kis_scan.KISScan.load_universe — 추정 거래대금을 증권사 실제 거래대금으로 덮어쓰기)."""
     cfg = cfg or Config()
     UNIVERSE_CACHE.parent.mkdir(parents=True, exist_ok=True)
     if offline:
@@ -95,6 +101,8 @@ def load_universe_data(cfg: Config | None = None, *, refresh: bool = False, offl
                       progress=_progress if verbose else None)
     errors = dict(_ohlcv.LAST_ERRORS)
     data = {c: d for c, d in data.items() if len(d) >= cfg.data.min_history_days}
+    if prepare is not None:
+        data = prepare(uni, data)
 
     index = {m: fetch_index(m, cfg.data.history_days, cache, refresh=refresh, offline=offline)
              for m in ("KOSPI", "KOSDAQ")}

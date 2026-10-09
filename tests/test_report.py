@@ -35,6 +35,10 @@ def new_scan() -> ScanResult:
                 "themes_all": ["HBM", "로봇", "소규모테마"], "best_rank_pct": 0.97}
     a.position = {"entry": 10690.0, "stop": 9900.0, "risk_pct": 0.0739, "shares": 1265, "amount": 13522850.0,
                   "max_loss": 999350.0, "plan": "피벗 10,690 돌파 매수", "cap": "위험"}
+    a.kst = ["투자경고", "단기과열"]
+    a.kis = {"tp_n30": 2, "tp_up30": 1, "tp_down30": 0, "tp_avg": 13000.0, "tp_gap": np.float64(21.5),
+             "opinions": [{"date": "20260923", "broker": "유안타", "opinion": "BUY", "target": 13500.0}],
+             "fwd_eps_g": 32.1, "eps_e": [("2026.12E", 1200.0), ["2027.12E", float("nan")]]}
     b.position = {"entry": 5000.0, "stop": 4300.0, "risk_pct": 0.14, "shares": 0, "amount": 0.0, "max_loss": 0.0,
                   "plan": "눌림 대기 (손절폭 14.0% > 10%)", "cap": None}
     scan = ScanResult(asof=ASOF, generated_at=pd.Timestamp("2026-10-07 16:00"),
@@ -57,6 +61,9 @@ def new_scan() -> ScanResult:
     ]
     scan.breadth = {"ALL": _breadth(), "KOSPI": _breadth(-4, 38.0), "KOSDAQ": _breadth(15, 61.0)}
     scan.prev_asof = "2026-10-06"
+    scan.kis = {"on": True, "line": "증권사 자료: 상태 2 · 실거래대금 2 · 수급 2 · 의견 2 · 실적 2 · 12초",
+                "reason": None, "day": "2026-10-07", "real_value": True,
+                "steps": [{"step": "status", "n": 2, "ok": 2, "fail": 0, "secs": 1.2}]}
     scan.account = {"size": 50_000_000.0, "risk_per_trade": 0.01, "max_position_pct": 0.2,
                     "max_entry_risk": 0.1, "max_liquidity_pct": 0.02}
     scan.dropped = [{"code": "005930", "name": "삼성전자", "market": "KOSPI", "pattern": "vcp", "stage": "near_pivot",
@@ -114,8 +121,18 @@ def test_new_fields_in_payload_and_html():
     assert a["pos"]["shares"] == 1265 and a["pos"]["plan"].startswith("피벗") and a["pos"]["cap"] == "위험"
     assert b["pos"]["shares"] == 0 and b["pos"]["cap"] is None and "대기" in b["pos"]["plan"]
 
+    assert a["kst"] == ["투자경고", "단기과열"] and b["kst"] == [] and b["kis"] is None
+    k = a["kis"]
+    assert k["tp_gap"] == 21.5 and k["tp_up30"] == 1 and k["fwd_eps_g"] == 32.1
+    assert k["eps_e"] == [["2026.12E", 1200], ["2027.12E", None]]
+    assert k["opinions"] == [{"date": "2026-09-23", "broker": "유안타", "opinion": "BUY", "target": 13500}]
+    assert d["kis"]["on"] is True and d["kis"]["line"].startswith("증권사 자료: 상태 2") and d["kis"]["real_value"]
+    assert d["observe_patterns"] == ["vocal", "absorb", "stage2"]
+
     for needle in ('id="v-radar"', 'id="v-groups"', 'id="dropBox"', "관심 목록 (매수 신호 아님)", "주도 업종·테마",
-                   "거래대금 300억 레이더", 'id="acct"', 'id="riskp"', 'id="dPlan"', 'id="dPos"', "주도주"):
+                   "거래대금 300억 레이더", 'id="acct"', 'id="riskp"', 'id="dPlan"', 'id="dPos"', "주도주",
+                   "목표가 괴리", "EPS(E) 성장", "수급 20일", 'id="dKisBox"', 'id="kisLine"', "tag ks",
+                   'id="v-value"', 'id="tab-value"', "저평가 종목"):
         assert needle in html, needle
 
 
@@ -125,6 +142,7 @@ def test_old_scan_renders_without_new_fields():
     assert d["breadth"] is None and d["prev_asof"] is None and d["account"] is None
     s = d["stocks"][0]
     assert s["badge"] is None and s["pos"] is None and s["groups"] is None and s["leader"] is False
+    assert d["kis"] is None and s["kst"] == [] and s["kis"] is None
     assert len(s["ohlcv"]["t"]) == len(s["ohlcv"]["c"])
 
 

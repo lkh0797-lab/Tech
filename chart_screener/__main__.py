@@ -2,6 +2,8 @@
 
     python -m chart_screener scan                 # 전 종목 스캔 → output/ 에 HTML·엑셀·CSV
     python -m chart_screener scan --offline       # 캐시만 사용 (네트워크 없이)
+    python -m chart_screener scan --kis off       # 증권사(KIS) 자료 없이 네이버만 (기본 auto: 설정·토큰이 되면 KIS)
+    python -m chart_screener scan --skip-holiday  # 휴장일이고 캐시가 이미 최신이면 스캔하지 않음 (작업 스케줄러용)
     python -m chart_screener analyze 005930       # 한 종목 모든 패턴 판정 상세
     python -m chart_screener market               # KOSPI/KOSDAQ 시장 방향
     python -m chart_screener backtest vcp         # 워크포워드 신호 성과 검증
@@ -88,11 +90,34 @@ def _cfg_years(a) -> Config:
     return cfg
 
 
+def _open_kis(a, tty: bool):
+    """--kis 값으로 증권사 자료 연결. (hub, 오류 코드 또는 None)."""
+    from . import kis_scan
+    hub = kis_scan.open_hub(a.kis, offline=a.offline, verbose=tty)
+    if a.kis == "on" and not hub.on:
+        print(f"증권사(KIS) 자료를 쓸 수 없습니다: {hub.reason}\n"
+              "  --kis auto 는 이때 네이버 자료로 계속합니다.", file=sys.stderr)
+        return hub, 1
+    print("증권사 자료: 한국투자증권 (상태 · 실거래대금 · 수급 · 투자의견 · 추정실적)" if hub.on
+          else f"증권사 자료 없음 — 네이버 ({hub.reason})")
+    return hub, None
+
+
+def _write_kis_snapshots(hub, out: Path) -> None:
+    try:
+        paths = hub.write_snapshots(out)
+    except Exception as e:
+        print(f"증권사 스냅샷 저장 실패: {type(e).__name__}: {e}", file=sys.stderr)
+        return
+    if paths:
+        print("증권사 스냅샷: " + " · ".join(str(p) for p in paths))
+
+
 def cmd_scan(a) -> int:
-    from . import journal
+    from . import journal, kis_scan, value_list
     from .patterns import REGISTRY
     from .report import write_report
-    from .scanner import enrich_investor, run_scan, to_frame
+    from .scanner import enrich_investor, refilter_candidates, run_scan, to_frame
     from .universe_data import load_universe_data
 
     pats, bad = _parse_patterns(a.patterns)
@@ -113,8 +138,17 @@ def cmd_scan(a) -> int:
             return 2
         cfg.risk_per_trade = a.risk / 100
     tty = sys.stderr.isatty()  # 작업 스케줄러 로그(리다이렉트)에는 진행률 표시를 남기지 않음
+    hub, err = _open_kis(a, tty)
+    if err is not None:
+        return err
+    if a.skip_holiday:
+        skip, why = kis_scan.holiday_skip(hub.client if hub.on else None)
+        if skip:
+            print(f"휴장일 — 스캔하지 않음 ({why})")
+            return 0
     print("데이터 적재 중...")
-    ud = load_universe_data(cfg, refresh=a.refresh, offline=a.offline, verbose=tty)
+    ud = load_universe_data(cfg, refresh=a.refresh, offline=a.offline, verbose=tty,
+                            prepare=hub.load_universe if hub.on else None)
     if ud.asof is None or not ud.ohlcv:
         print("분석할 일봉 데이터가 없습니다 (캐시가 비었거나 수집 실패). 온라인으로 다시 실행해 보세요.",
               file=sys.stderr)
@@ -122,13 +156,42 @@ def cmd_scan(a) -> int:
     print(f"시장 상태 (기준일 {ud.asof:%Y-%m-%d})")
     _print_market(ud)
     _print_breadth(ud)
-    scan = run_scan(ud, cfg, pats, verbose=tty, offline=a.offline)
+    vl = value_list.load_value()
+    if vl is not None:
+        demoted = vl.apply_status(hub.exclude) if hub.used and hub.res.status else 0
+        print(vl.summary_line() + (f" (증권사 상태로 저평가 → 관찰 {demoted})" if demoted else ""))
+    scan = run_scan(ud, cfg, pats, verbose=tty, offline=a.offline, kis=hub if hub.used else None, value=vl)
+    if scan.excluded:
+        print(f"증권사 상태로 후보 제외 {len(scan.excluded)}종목: "
+              + ", ".join(f"{d['name']}({d['reason'].split(': ')[-1]})" for d in scan.excluded[:8])
+              + (f" 외 {len(scan.excluded) - 8}" if len(scan.excluded) > 8 else ""))
+    if hub.on and (scan.stocks or scan.value_scans):
+        try:
+            got = hub.enrich(scan, verbose=tty)
+            print(f"증권사 자료 반영: 수급 {got['flows']} · 투자의견 {got['opinion']} · 추정실적 {got['estimate']}종목 "
+                  f"(후보 {len(scan.stocks)}" + (f" + 저평가 목록 {got['value']}" if got.get("value") else "")
+                  + ", CAN SLIM I 재계산)")
+        except Exception as e:   # 후보 자료 단계 실패 — 리포트 · 일지는 그대로 쓴다
+            hub.res.fatal = hub.res.fatal or f"{type(e).__name__}: {e} (후보 자료 단계에서 중단)"
+            print(f"증권사 후보 자료 실패: {type(e).__name__}: {e}", file=sys.stderr)
     if a.investor_top > 0 and scan.stocks:
-        k = enrich_investor(scan, top=a.investor_top, offline=a.offline, verbose=tty)
-        print(f"수급 자료 반영: 상위 {k}종목 (CAN SLIM I 재계산)")
+        k = enrich_investor(scan, top=a.investor_top, offline=a.offline, verbose=tty, only_missing=hub.used)
+        if k or not hub.used:
+            print(f"수급 자료 반영(네이버): 상위 {k}종목" + (" — 증권사 수급이 없는 종목만" if hub.used else "")
+                  + " (CAN SLIM I 재계산)")
+    gone, came = refilter_candidates(scan)
+    if gone or came:
+        print(f"수급 반영 뒤 후보 조정: 빠짐 {gone} · 들어옴 {came} (CAN SLIM 재계산)")
+    scan.kis = hub.report_info()
+    for line in hub.timing_lines():
+        print(line)
     print(f"분석 {scan.scanned}종목 · 후보 {len(scan.stocks)} · {scan.elapsed:.0f}초"
           + (f" · 오류 {len(scan.errors)}건" if scan.errors else "")
           + (f" · 300억 레이더 {len(scan.radar)}" if scan.radar else ""))
+    if scan.value is not None:
+        n_cand = sum(1 for s in scan.stocks if s.code in scan.value_scans)
+        print(f"저평가 목록: 패턴 판정 {len(scan.value_scans)} (후보 {n_cand}) · 미판정 {len(scan.value_skipped)}"
+              f"(유동성 · 기간 부족)")
 
     # 일지: 직전 스캔 대비 배지·탈락 → 기록 (일부 패턴만 돌린 스캔은 비교가 왜곡되므로 기록하지 않음)
     if pats is None and not a.no_journal:
@@ -146,6 +209,7 @@ def cmd_scan(a) -> int:
 
     out = Path(a.out or OUTPUT_DIR)
     out.mkdir(parents=True, exist_ok=True)
+    _write_kis_snapshots(hub, out)
     stamp = f"{scan.generated_at:%Y%m%d_%H%M}"
     table = to_frame(scan)
     table.to_csv(out / f"scan_{stamp}.csv", index=False, encoding="utf-8-sig")
@@ -329,6 +393,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--journal", default="", help="스캔 일지 경로 (기본 output/journal.csv)")
     s.add_argument("--years", type=float, default=None,
                    help="일봉 이력 연수 (기본 3년, 최대 약 10년). 예: --years 10")
+    s.add_argument("--kis", choices=["auto", "on", "off"], default="auto",
+                   help="증권사(한국투자증권) 자료 — 상태 · 실거래대금 · 수급 · 투자의견 · 추정실적. "
+                        "auto: 설정·토큰이 되면 사용, 아니면 네이버(사유 표시, --offline 이면 끔) · on: 반드시 사용 · off: 끔")
+    s.add_argument("--skip-holiday", action="store_true",
+                   help="오늘이 휴장일이고 캐시 최신 봉이 이미 직전 개장일이면 스캔하지 않고 끝냄 (작업 스케줄러용)")
     s.set_defaults(fn=cmd_scan)
 
     s = sub.add_parser("analyze", help="한 종목 상세 판정")

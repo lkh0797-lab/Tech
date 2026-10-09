@@ -1,7 +1,13 @@
 """스캔 결과 → 단일 HTML 리포트 (차트 데이터 내장, 오프라인 열람 가능 / 차트 라이브러리만 CDN).
 
-새 필드(포지션·배지·업종/테마·레이더·시장 폭·탈락 목록)는 ``getattr`` 로 읽어, 해당 필드가 없는
+새 필드(포지션·배지·업종/테마·레이더·시장 폭·탈락 목록·저평가 목록)는 ``getattr`` 로 읽어, 해당 필드가 없는
 예전 ScanResult/StockScan 으로도 그대로 렌더링된다 (템플릿이 빈 섹션을 숨김).
+
+'저평가 종목' 탭 (ScanResult.value, 기업추적 저평가 목록이 있을 때만)
+    value = {"date", "source", "n", "tiers": {등급: 수}, "rows": [목록 전 종목 — 등급 · 저평가 수치 · Tech 패턴(단계) ·
+             수급 · 목표가 · 종가 미니차트]}. 후보가 아닌 '저평가' 등급 종목은 value_stocks 에 짧은 이력(약 250봉)을 담아
+    차트를 열 수 있게 하고(탐지된 패턴이 있는 종목만, 저평가 점수순 MAX_VALUE_CHARTS 개까지), '관찰' 등급 비후보는
+    미니차트만 (리포트 크기).
 """
 from __future__ import annotations
 
@@ -20,6 +26,15 @@ TEMPLATE = Path(__file__).with_name("template.html")
 MIN_BARS, MAX_BARS, PAD_BARS = 2600, 2600, 30  # 불러온 이력 전체(최대 약 10년)를 담고, 기본 보기는 3년 (차트 기간 버튼)
 MAX_RADAR, MAX_GROUPS, MAX_DROPPED, SPARK_DAYS = 300, 15, 200, 60
 MAX_POSITION_PCT = 0.20   # 1종목 최대 비중 (계좌 대비) — 클라이언트 수량 재계산 상한
+# 탐지 목록(태그 · 상세 탭) 순서: 베이스 → CAN SLIM · 포켓 피벗 → 저평가 종목(정보) → 관찰 전용(보컬 · 바닥 투매 흡수 · 바닥 탈출)
+DETECTED_ORDER = (list(scoring.BASE_PATTERNS) + ["canslim", "pocket_pivot"] + list(scoring.INFO_PATTERNS)
+                  + list(scoring.OBSERVE_PATTERNS))
+# 후보 목록 칩 순서 (베이스 칩 뒤): CAN SLIM · 포켓 피벗 · 보컬 · 저평가 종목 · 바닥 투매 흡수 · 바닥 탈출
+CHIP_ORDER = (["canslim", "pocket_pivot"] + list(scoring.OBSERVE_PATTERNS[:1]) + list(scoring.INFO_PATTERNS)
+              + list(scoring.OBSERVE_PATTERNS[1:]))
+VALUE_CHART_BARS, VALUE_SPARK_BARS = 250, 120   # 저평가 탭: 비후보 '저평가' 등급 차트 봉 수 · 미니차트 봉 수
+MAX_VALUE_CHARTS = 120                          # 비후보 '저평가' 등급 차트 상한 (저평가 점수순 — 종목당 약 19KB, 리포트 크기)
+VALUE_KEEP = ("trend_template",)                # 비후보 차트에 탐지 안 된 패턴 중 담을 것 (나머지는 크기 때문에 뺀다)
 
 
 def _r(x, nd=0):
@@ -188,16 +203,46 @@ def _account(scan: ScanResult) -> dict | None:
             "max_entry_risk": _r(a.get("max_entry_risk"), 4), "max_liquidity_pct": _r(a.get("max_liquidity_pct"), 4)}
 
 
-def stock_payload(s: StockScan, rank: int) -> dict:
+def _stock_kis(k) -> dict | None:
+    """StockScan.kis (kis_scan.stock_kis) → 리포트용. 목표가 괴리 · EPS 증가율은 % 단위."""
+    if not isinstance(k, dict):
+        return None
+    ops = [{"date": _date(o.get("date")), "broker": str(o.get("broker") or ""), "opinion": str(o.get("opinion") or ""),
+            "target": _r(o.get("target"))} for o in _records(k.get("opinions")) if isinstance(o, dict)][:3]
+    eps = [[str(e[0]), _r(e[1])] for e in _records(k.get("eps_e")) if isinstance(e, (list, tuple)) and len(e) >= 2][:2]
+    return {"tp_n30": _r(k.get("tp_n30")), "tp_up30": _r(k.get("tp_up30")), "tp_down30": _r(k.get("tp_down30")),
+            "tp_avg": _r(k.get("tp_avg")), "tp_gap": _r(k.get("tp_gap"), 2), "opinions": ops,
+            "fwd_eps_g": _r(k.get("fwd_eps_g"), 2), "eps_e": eps}
+
+
+def _kis_header(scan: ScanResult) -> dict | None:
+    """ScanResult.kis → 헤더 한 줄 {on, line, reason, day, real_value}. 필드가 없으면(예전 스캔·analyze) None."""
+    k = getattr(scan, "kis", None)
+    if not isinstance(k, dict):
+        return None
+    return {"on": bool(k.get("on")), "line": str(k.get("line") or ""), "reason": k.get("reason") or None,
+            "day": k.get("day"), "real_value": bool(k.get("real_value")),
+            "steps": [{"step": str(st.get("step")), "n": _r(st.get("n")), "ok": _r(st.get("ok")),
+                       "fail": _r(st.get("fail")), "secs": _r(st.get("secs"), 1)}
+                      for st in _records(k.get("steps")) if isinstance(st, dict)]}
+
+
+def stock_payload(s: StockScan, rank: int, max_bars: int | None = None, slim: bool = False) -> dict:
+    """종목 하나 → 리포트 자료. max_bars 가 있으면 차트 이력을 최근 그 봉 수로 자르고, slim 이면 탐지된 패턴(+VALUE_KEEP)만
+    담는다 — 저평가 탭의 비후보 종목용 (리포트 크기)."""
     ctx = s.ctx
     df = ctx.df
     i0 = _window_start(s)
+    if max_bars:
+        i0 = max(i0, len(df) - max_bars)
     w = df.iloc[i0:]
     # 표시용 대표(보컬만 걸린 종목은 보컬) — 예전 StockScan 모양(display_lead 없음)도 그대로 그린다
     best = s.display_lead() if hasattr(s, "display_lead") else s.lead()
     _, risk = s.entry_risk()
     pats = {}
     for name, r in s.results.items():
+        if slim and not r.detected and name not in VALUE_KEEP:
+            continue
         d = r.to_dict()
         pats[name] = {k: d[k] for k in ("detected", "score", "stage", "pivot", "stop", "start_date", "end_date",
                                         "breakout_date", "metrics", "reasons", "warnings", "annotations")}
@@ -216,8 +261,7 @@ def stock_payload(s: StockScan, rank: int) -> dict:
         "best": best.name if best else None, "stage": best.stage if best else None,
         "dist": _r(s.close / best.pivot - 1, 4) if best and best.pivot else None,
         "risk": _r(risk, 4),
-        "detected": [n for n in list(scoring.BASE_PATTERNS) + ["canslim", "pocket_pivot", "vocal"]
-                     if n in s.results and s.results[n].detected],
+        "detected": [n for n in DETECTED_ORDER if n in s.results and s.results[n].detected],
         "bd": {"pattern_part": s.score.pattern_part, "tech_part": s.score.tech_part,
                "rs_part": s.score.rs_part, "notes": s.score.notes},
         "badge": getattr(s, "badge", None) or None,
@@ -231,16 +275,92 @@ def stock_payload(s: StockScan, rank: int) -> dict:
             "o": _arr(w["open"]), "h": _arr(w["high"]), "l": _arr(w["low"]), "c": _arr(w["close"]),
             "v": _arr(w["volume"]),
         },
-        "ma": {f"sma{n}": _arr(ctx.sma(n).iloc[i0:], 1) for n in (50, 150, 200)},
+        "ma": {f"sma{n}": _arr(ctx.sma(n).iloc[i0:], 0 if slim else 1) for n in (50, 150, 200)},   # slim: 원 단위 (크기)
         "rsl": rsl_vals,
         "inv": investor_summary(s),
+        "kst": [str(x) for x in (getattr(s, "kst", None) or [])],     # 증권사 종목 상태 태그 (경고 칩)
+        "kis": _stock_kis(getattr(s, "kis", None)),
     }
+
+
+# ---------------------------------------------------------------- 저평가 종목 탭
+def _vnum(r: dict) -> dict:
+    nd = {"score": 1, "per": 1, "per_then": 1, "per_pct": 0, "dd": 1, "roe": 1, "debt_eq": 0, "ni_yoy": 1, "px_yoy": 1}
+    return {k: _r(r.get(k), d) if d else _r(r.get(k)) for k, d in nd.items()}
+
+
+def _value_pats(s: StockScan) -> list:
+    """목록 종목에 걸린 Tech 패턴 [[이름, 단계], …] (저평가 종목 칩 자신은 뺀다)."""
+    return [[n, s.results[n].stage] for n in DETECTED_ORDER
+            if n not in scoring.INFO_PATTERNS and n in s.results and s.results[n].detected]
+
+
+def _value_row(r: dict, s: StockScan | None, skip: dict | None) -> dict:
+    row = {"code": r["code"], "name": r.get("name") or r["code"], "tier": r.get("tier"), "industry": r.get("industry") or "",
+           "why": list(r.get("tier_why") or []), "risk": r.get("risk"), **_vnum(r)}
+    if s is not None:
+        closes = s.ctx.df["close"].iloc[-VALUE_SPARK_BARS:] if s.ctx is not None else pd.Series(dtype=float)
+        row.update(market=s.market, market_cap=_r(s.market_cap), rs=_r(s.rs), close=_r(s.close), chg=_r(s.change_pct, 4),
+                   kst=[str(x) for x in (getattr(s, "kst", None) or [])], pats=_value_pats(s), skip=None,
+                   thin=getattr(s, "thin", None),
+                   inv=investor_summary(s) if s.ctx is not None else None, kis=_stock_kis(getattr(s, "kis", None)),
+                   spark=_arr(closes))
+    else:
+        k = skip or {}
+        row.update(market=k.get("market"), market_cap=_r(k.get("market_cap")), rs=_r(k.get("rs")), close=_r(k.get("close")),
+                   chg=_r(k.get("chg"), 4), kst=[str(x) for x in k.get("kst") or []], pats=[],
+                   skip=str(k.get("why") or "분석 안 함"), inv=None, kis=None,
+                   spark=[_r(v) for v in (k.get("spark") or [])[-VALUE_SPARK_BARS:]])
+    return row
+
+
+def _value(scan: ScanResult, listed: set[str]) -> tuple[dict | None, list[dict]]:
+    """(저평가 탭 자료, 비후보 '저평가' 등급 종목의 짧은 차트 자료). 목록이 없으면 (None, [])."""
+    vl = getattr(scan, "value", None)
+    if vl is None or not hasattr(vl, "rows"):
+        return None, []
+    scans = getattr(scan, "value_scans", None) or {}
+    skipped = getattr(scan, "value_skipped", None) or {}
+    cands = {s.code for s in scan.stocks}
+    # 비후보 '저평가' 등급 중 차트를 담을 종목: 탐지된 패턴이 있고(없으면 열 탭이 없다), 저평가 점수 높은 순 상한까지
+    # 후보(상위 top 밖 포함)는 뺀다 — 짧은 '후보 아님' 차트로 그리면 매수 계획이 가려진다
+    eligible = [r for r in vl.rows if r.get("tier") == "저평가" and r["code"] not in cands
+                and (s := scans.get(r["code"])) is not None and s.ctx is not None
+                and any(x.detected for x in s.results.values())]
+    # 상한 안 순서: Tech 패턴(정보 칩 '저평가 종목' 말고)이 걸린 종목 먼저, 그다음 저평가 점수순
+    eligible.sort(key=lambda r: (not _value_pats(scans[r["code"]]),
+                                 -(r.get("score") if r.get("score") is not None else -1)))
+    eligible_codes = {r["code"] for r in eligible}
+    chart_codes = {r["code"] for r in eligible[:MAX_VALUE_CHARTS]}
+    rows, charts = [], []
+    for r in vl.rows:
+        s = scans.get(r["code"])
+        row = _value_row(r, s, skipped.get(r["code"]))
+        row["in_list"] = r["code"] in listed
+        row["cand"] = r["code"] in cands                 # 후보(상위 top 밖이어도) — '후보' 태그
+        row["chart"] = row["in_list"]
+        if r["code"] in chart_codes:
+            p = stock_payload(s, 0, max_bars=VALUE_CHART_BARS, slim=True)
+            p["vonly"] = True
+            charts.append(p)
+            row["chart"] = True
+        elif not row["chart"]:
+            row["nochart"] = ("후보 — 리포트 상위 목록 밖 (후보 표 CSV · 엑셀에 있음)" if row["cand"]
+                              else "패턴 미판정" if row.get("skip") else "관찰 등급" if r.get("tier") != "저평가"
+                              else "탐지된 패턴 없음" if r["code"] not in eligible_codes
+                              else f"차트 상한 {MAX_VALUE_CHARTS}개 밖")
+        rows.append(row)
+    d = vl.date
+    meta = {"date": f"{d[:4]}-{d[4:6]}-{d[6:8]}" if d and len(d) == 8 else d, "source": vl.source, "n": len(rows),
+            "tiers": vl.counts(), "chart_bars": VALUE_CHART_BARS, "spark_bars": VALUE_SPARK_BARS, "rows": rows}
+    return meta, charts
 
 
 def build_payload(scan: ScanResult, top: int = 150) -> dict:
     stocks = [s for s in scan.stocks if s.ctx is not None][:top]
     listed = {s.code for s in stocks}
     prev = getattr(scan, "prev_asof", None)
+    value, value_stocks = _value(scan, listed)
     return {
         "asof": f"{scan.asof:%Y-%m-%d}" if scan.asof is not None else "-",
         "generated_at": f"{scan.generated_at:%Y-%m-%d %H:%M}",
@@ -248,6 +368,10 @@ def build_payload(scan: ScanResult, top: int = 150) -> dict:
         "scanned": scan.scanned,
         "labels": {n: lbl for n, (lbl, _) in REGISTRY.items()},
         "base_patterns": [n for n in scoring.BASE_PATTERNS if n in REGISTRY],
+        "chip_patterns": [n for n in CHIP_ORDER if n in REGISTRY],
+        "observe_patterns": [n for n in scoring.OBSERVE_PATTERNS if n in REGISTRY],
+        "info_patterns": [n for n in scoring.INFO_PATTERNS if n in REGISTRY],
+        "kis": _kis_header(scan),
         "market": {k: {"name": m.name, "state": m.state, "label": m.label, "close": m.close,
                        "distribution_days": m.distribution_days, "notes": m.notes,
                        "last_ftd": m.last_ftd} for k, m in scan.market.items()},
@@ -260,6 +384,8 @@ def build_payload(scan: ScanResult, top: int = 150) -> dict:
         "groups": _groups(scan, listed) if getattr(scan, "groups", None) is not None else None,
         "dropped": _dropped(scan) if getattr(scan, "dropped", None) is not None else None,
         "stocks": [stock_payload(s, i + 1) for i, s in enumerate(stocks)],
+        "value": value,                     # 저평가 목록 없으면 None (탭 · 칩 숨김)
+        "value_stocks": value_stocks,       # 비후보 '저평가' 등급 종목 짧은 차트 (약 250봉)
     }
 
 

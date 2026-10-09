@@ -263,6 +263,12 @@ def run_backtest(bt: BacktestConfig, workers: int | None = None, codes: list[str
     if bt.pattern == "vocal":
         raise ValueError("보컬은 날마다 전 시장 단면(거래대금 순위 · 테마 강도 · 대장)이 필요해 이 백테스트로는 잴 수 없다 — "
                          "검증은 기업추적 도구/보컬_백테스트.py (README '보컬 눌림목' 참고)")
+    if bt.pattern == "undervalued":
+        raise ValueError("저평가 종목은 기업추적 저평가 목록(외부 파일, 그날 하루치)을 붙이는 정보 칩이라 과거 날짜로 잴 수 없다 — "
+                         "검증은 기업추적 도구/저평가V2_백테스트.py")
+    if bt.pattern == "absorb" and (bt.mode != "stage" or not {"near_pivot", "forming"} & set(bt.stages)):
+        raise ValueError("바닥 투매 흡수는 돌파일이 없는 관찰 패턴(단계는 near_pivot · forming 만)이라 돌파일 모드나 "
+                         "--stages breakout 으로는 신호가 생기지 않는다 — --mode stage --stages near_pivot,forming 으로 재라")
     ud = load_universe_data(_cfg(bt.history_days), offline=True, verbose=False)
     first = min(d.index[0] for d in ud.ohlcv.values())
     since = bt.since or str((first + pd.tseries.offsets.BDay(bt.min_bars)).date())

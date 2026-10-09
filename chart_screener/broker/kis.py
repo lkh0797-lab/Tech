@@ -533,12 +533,20 @@ class TokenManager:
                         return self._token
             return self._issue()
 
-    def invalidate(self) -> None:
-        """서버가 토큰을 거부했을 때(EGW00121·EGW00123): 메모리·캐시에서 지운다."""
+    def invalidate(self, rejected: str | None = None) -> None:
+        """서버가 토큰을 거부했을 때(EGW00121·EGW00123): 메모리·캐시에서 지운다.
+
+        rejected = 거부된 요청에 실었던 토큰. 여러 스레드가 같은 관리자를 쓸 때, 다른 스레드가 이미 새 토큰을 받았으면
+        (지금 토큰 ≠ rejected) 그 새 토큰은 지우지 않는다 — 지우면 1분 1회 발급 한도(EGW00133)에 걸린다."""
         with self._lock:
+            if rejected is not None and self._token and self._token != rejected:
+                return
             self._token, self._expires_at = None, 0.0
             st = self._load_state()
             if isinstance(st.get("tokens"), dict):
+                ent = st["tokens"].get(self.cfg.key_id)
+                if rejected is not None and isinstance(ent, dict) and ent.get("token") not in (None, rejected):
+                    return
                 st["tokens"].pop(self.cfg.key_id, None)
                 self._save_state(st)
 
@@ -683,7 +691,11 @@ class KISRestClient:
                 self._sleep(max(1.0, self.backoff * 2 ** attempt))
                 continue
             if code in ("EGW00121", "EGW00123") and not refreshed:
-                self.tokens.invalidate()
+                used = str(headers.get("authorization") or "")[len("Bearer "):] or None
+                try:
+                    self.tokens.invalidate(used)
+                except TypeError:             # 예전 모양 토큰 관리자(인자 없음)
+                    self.tokens.invalidate()
                 refreshed = True
                 continue
             if r.status_code >= 500:
