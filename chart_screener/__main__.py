@@ -11,13 +11,15 @@
     python -m chart_screener update               # 데이터만 갱신
     python -m chart_screener live                 # 실시간 감시: 후보 + 증권사(KIS)/네이버 시세 → 돌파·눌림·손절 알림
     python -m chart_screener live --check         # 한국투자증권 연결 점검 (설정·토큰·현재가·개장일·웹소켓)
+    python -m chart_screener news --codes 010170  # 종목 뉴스 제목(증권사) → cache/kis/news/<code>.json
 
-live 는 조회 전용이다 — 주문(매수·매도) 기능이 없다.
+live · news 는 조회 전용이다 — 주문(매수·매도) 기능이 없다.
 """
 from __future__ import annotations
 
 import argparse
 import io
+import re
 import sys
 import webbrowser
 from pathlib import Path
@@ -382,6 +384,44 @@ def cmd_live(a) -> int:
     return run(a)
 
 
+def cmd_news(a) -> int:
+    """종목 뉴스 제목(한국투자증권 FHKST01011800, 조회 전용) → cache/kis/news/<code>.json. 기업추적 뷰어 '내러티브' 탭이
+    하위 프로세스로 부른다. 0 정상 · 1 증권사 연결 없음 / 치명 오류 / 받으려 한 종목이 모두 실패 · 2 인자 오류.
+    실패 사유는 stdout 마지막 줄에 둔다(뷰어가 그 줄을 보여 준다 — stderr 는 줄마다 먼저 나가 앞에 섞인다)."""
+    from .data import kis_market as km
+    from .data import kis_news as news
+
+    codes = list(dict.fromkeys(c.strip().upper() for c in (a.codes or "").split(",") if c.strip()))
+    bad = [c for c in codes if not re.fullmatch(r"[0-9A-Z]{6}", c)]
+    if not codes or bad:
+        print("--codes 에 종목코드 6자리를 쉼표로 주세요 (예: --codes 010170,005930)"
+              + (f" — 잘못된 코드: {', '.join(bad)}" if bad else ""), file=sys.stderr)
+        return 2
+    if a.pages < 1 or a.days < 1 or not a.budget > 0 or not a.per_sec > 0:
+        print("--pages · --days 는 1 이상, --budget · --per-sec 는 0보다 커야 합니다.", file=sys.stderr)
+        return 2
+    client, why = km.client_or_none()
+    if client is None:
+        print(f"뉴스 제목을 받을 수 없습니다: {why}", file=sys.stderr)
+        return 1
+    tty = sys.stderr.isatty()  # 뷰어 로그(리다이렉트)에는 진행률 표시를 남기지 않음
+    prog = (lambda i, n: print(f"\r  뉴스 제목 {i}/{n}", end="" if i < n else "\n", file=sys.stderr, flush=True)) \
+        if tty else None
+    res = news.run(client, codes, cache=news.NewsCache(a.out) if a.out else None, pages=a.pages, days=a.days,
+                   budget=a.budget, per_sec=a.per_sec, progress=prog)
+    for it in res.items:
+        print(it.line())
+    for code, msg in res.errors.items():
+        print(f"  {code} 실패: {msg}", file=sys.stderr)
+    print(res.summary_line())
+    if res.stopped:
+        return 1
+    if res.errors and len(res.errors) >= res.codes - res.pending:    # 시작한 종목이 모두 실패 (일부 저장했어도)
+        print(f"뉴스 제목을 받지 못했습니다: {next(iter(res.errors.values()))}")
+        return 1
+    return 0
+
+
 LIVE_HELP = "실시간 감시 — 스캔 후보 + 증권사(한국투자증권)/네이버 시세 → 돌파·눌림·손절 알림 (조회 전용, 주문 없음)"
 LIVE_DESC = (
     "스캔 후보 중 돌파·피벗 근접·300억 눌림목·돌파 전 관찰·돌파 매수 대기 종목(최대 40)을 실시간 시세로 감시해 "
@@ -495,6 +535,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--check-code", default="005930", help="--check 에서 조회할 종목 (기본 005930)")
     s.add_argument("--out", default="")
     s.set_defaults(fn=cmd_live)
+
+    s = sub.add_parser("news", help="종목 뉴스 제목(한국투자증권, 조회 전용) → cache/kis/news/<code>.json",
+                       description="한국투자증권 '종합 시황/공시(제목)' 을 종목마다 받아 쌓는다. 처음엔 1년치 뉴스(중소형주 약 44쪽)까지 "
+                                   "거꾸로, 이후엔 새 제목만. 쪽 수 · 시간 한도에 걸리면 다음 실행에서 이어 받는다. "
+                                   "기사 본문은 받지 않는다. 이 PC 의 본인 분석용.")
+    s.add_argument("--codes", default="", help="종목코드 (쉼표 구분)")
+    s.add_argument("--pages", type=int, default=60, help="종목마다 이번에 받을 최대 쪽 수 (1쪽 40행, 기본 60)")
+    s.add_argument("--days", type=int, default=400, help="거꾸로 받을 달력 일수 (기본 400 — 언론 기사는 증권사가 약 1년만 보관)")
+    s.add_argument("--budget", type=float, default=120.0, help="전체 시간 한도(초, 기본 120)")
+    s.add_argument("--per-sec", type=float, default=1.0, help="초당 호출 수 (기본 1 — 이 조회는 초당 한도가 빡빡함)")
+    s.add_argument("--out", default="", help="저장 폴더 (기본 cache/kis/news)")
+    s.set_defaults(fn=cmd_news)
 
     a = ap.parse_args(argv)
     return a.fn(a)
