@@ -3,7 +3,7 @@
     hub = open_hub("auto")                                        # 클라이언트가 없으면 hub.on = False, hub.reason = 한글 사유
     ud = load_universe_data(cfg, prepare=hub.load_universe)       # ① 전 종목 상태 ② 실제 거래대금 → 일봉 'value' 덮어쓰기
     scan = run_scan(ud, cfg, kis=hub)                             # 상태 제외(거래정지·정리매매·관리종목·투자위험) · 태그
-    hub.enrich(scan)                                              # ③ 후보 수급 ④ 투자의견 ⑤ 추정실적 → CAN SLIM I · s.kis
+    hub.enrich(scan)                                              # ③ 후보 수급 ④ 투자의견 ⑤ 추정실적 → s.kis (표시용)
     hub.write_snapshots(out_dir)                                  # out/kis_snapshot.json + cache/kis/snapshot.json
 
 순서가 중요하다: 실제 거래대금은 패턴 · 시장 폭 · 업종 강도 · 300억 레이더 · 보컬 단면보다 먼저 들어가야 하므로
@@ -138,11 +138,9 @@ class KISScan:
 
     # ------------------------------------------------------------ ③④⑤ 후보
     def enrich(self, scan, verbose: bool = False) -> dict:
-        """후보 전부에 KIS 수급(CAN SLIM I 재계산) · 투자의견 · 추정실적을 붙인다. 반환 {단계: 붙인 종목 수}.
+        """후보 전부에 KIS 수급 · 투자의견 · 추정실적을 붙인다(리포트 표시용 — 종합 점수에는 안 쓴다). 반환 {단계: 붙인 종목 수}.
         저평가 목록 종목(scan.value_scans, 후보 아님)도 같은 단계로 함께 받는다(리포트 '저평가 종목' 탭) — 그때만
         반환에 'value'(함께 받은 비후보 목록 종목 수)가 붙고, 단계별 수는 후보 + 목록 종목 합이다."""
-        from .scanner import recalc_canslim
-
         targets = [s for s in scan.stocks if s.ctx is not None]
         extra = value_targets(scan, targets)
         targets += extra
@@ -161,7 +159,6 @@ class KISScan:
             if km.attach_flows(s.ctx, fl, getattr(st, "hold", None) if st is not None else None) is not None:
                 s.ctx.info["kis_flows"] = fl
                 out["flows"] += 1
-                recalc_canslim(s)
         # 목표가 여력 기준가: 증권사 현재가, 상태 조회에 실패한 종목은 스캔 종가
         prices = {s.code: s.close for s in targets if s.close and s.close > 0}
         prices.update({c: st.price for c, st in self.res.status.items() if st.price})

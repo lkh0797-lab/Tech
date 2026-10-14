@@ -1,7 +1,7 @@
 """스캔 ↔ 증권사(KIS) 자료 연결 (chart_screener.kis_scan) — 가짜 KIS 클라이언트로 네트워크 없이 검증.
 
 상태 제외 → 탈락 목록, 상태 태그 → 리포트, 실제 거래대금 덮어쓰기 → 300억 레이더, 후보 수급 · 의견 · 추정 → payload,
-관찰 전용 패턴(absorb · stage2)은 혼자 후보가 되지 않음, 휴장일 건너뛰기, CLI(--kis · --skip-holiday).
+정보 칩(저평가)은 혼자 후보가 되지 않음 · 관찰 패턴은 보컬만, 휴장일 건너뛰기, CLI(--kis · --skip-holiday).
 """
 import json
 import threading
@@ -187,12 +187,13 @@ def test_journal_keeps_status_exclusions(tmp_path, monkeypatch):
     ud = make_ud({c: _df(seed=i) for i, c in enumerate(["000001", "000002"])})
     scan = scan_with(hub, ud, monkeypatch)
     prev = pd.DataFrame([{"asof": "2023-01-01", "code": "000002", "name": "종목2", "market": "KOSPI",
-                          "pattern": "vcp", "stage": FORMING, "composite": 50.0, "close": 9000.0}])
+                          "pattern": "cup_with_handle", "stage": FORMING, "composite": 50.0, "close": 9000.0,
+                          "rule": "cwh_reference_v1.0.0"}])
     jcols = journal.COLUMNS
     prev = prev.reindex(columns=jcols)
     journal.annotate(scan, journal=prev)
     assert [d["code"] for d in scan.dropped] == ["000002"]
-    assert scan.dropped[0]["reason"] == "증권사 상태 제외: 거래정지" and scan.dropped[0]["pattern"] == "vcp"
+    assert scan.dropped[0]["reason"] == "증권사 상태 제외: 거래정지" and scan.dropped[0]["pattern"] == "cup_with_handle"
 
 
 def test_real_turnover_overwrites_value_and_changes_radar(tmp_path, monkeypatch):
@@ -236,8 +237,7 @@ def test_enrich_flows_opinions_estimates_and_report_columns(tmp_path, monkeypatc
     assert inv["src"] == "KIS" and inv["days"] == 20
     assert inv["inst"] == pytest.approx(20 * 3e8) and inv["foreign"] == pytest.approx(20 * 1e8)   # 체결 금액 합 (억원 → 원)
     assert inv["foreign_ratio"] == pytest.approx(30.0)          # 외국인 보유율 (소진율 46.35 아님)
-    assert any("[I]" in line for line in s.results["canslim"].reasons + s.results["canslim"].warnings)
-    assert s.results["canslim"].metrics.get("inv_inst_20") == pytest.approx(20 * 2000)            # CAN SLIM I 재계산
+    assert "canslim" not in s.results                            # 수급은 표시용 — 점수를 다시 계산하지 않는다
     k = s.kis
     assert k["tp_up30"] >= 1 and k["tp_avg"] > 0 and len(k["opinions"]) == 3
     assert k["tp_gap"] == pytest.approx(round((k["tp_avg"] / s.close - 1) * 100, 2))
@@ -292,33 +292,37 @@ def _pr(name, detected=True, stage=FORMING):
 
 
 def test_observe_only_patterns_never_create_candidates():
-    assert scoring.OBSERVE_PATTERNS == ("vocal", "absorb", "stage2")
+    assert scoring.OBSERVE_PATTERNS == ("day_leader", "vocal")
     assert not set(scoring.OBSERVE_PATTERNS) & set(scoring.BASE_PATTERNS)
-    only_obs = {"absorb": _pr("absorb"), "stage2": _pr("stage2", stage=BREAKOUT)}
-    assert scoring.is_candidate(only_obs, 99) is False
-    assert scoring.is_candidate({**only_obs, "vocal": _pr("vocal")}, 99) is True        # 보컬만 예외 (관찰 칩)
-    sb = scoring.compute({**only_obs, "vcp": _pr("vcp", detected=False)}, 95)
+    info_only = {"undervalued": _pr("undervalued", stage=None)}
+    assert scoring.is_candidate(info_only, 99) is False                               # 정보 칩은 혼자 후보 아님
+    assert scoring.is_candidate({**info_only, "vocal": _pr("vocal")}, 99) is True      # 보컬은 관찰 칩으로 후보
+    sb = scoring.compute({**info_only, "vocal": _pr("vocal", stage=BREAKOUT),
+                          "cup_with_handle": _pr("cup_with_handle", detected=False)}, 95)
     assert sb.best_pattern is None and sb.pattern_part == 0 and sb.detected_bases == []
 
 
 def test_observe_patterns_in_detected_tabs_and_labels(monkeypatch):
     from chart_screener.patterns import REGISTRY
     from chart_screener.report import html as rhtml
-    assert rhtml.DETECTED_ORDER[-3:] == ["vocal", "absorb", "stage2"]
-    assert {"absorb", "stage2"} <= set(REGISTRY)
+    assert rhtml.DETECTED_ORDER == ["cup_with_handle", "trendline_break", "fib_pullback", "trendline_fib",
+                                    "ma60_supply", "red_three_monthly", "undervalued", "day_leader", "vocal"]
+    assert not {"absorb", "stage2", "canslim", "pocket_pivot"} & set(REGISTRY)       # 2026-10-14 제거
     frames = {"000001": _df(seed=1)}
     monkeypatch.setattr(scoring, "is_candidate", lambda results, rs=None: True)
     scan = scanner.run_scan(make_ud(frames), Config(), verbose=False, sector_map=EMPTY_SECTORS)
     s = scan.stocks[0]
-    s.results["absorb"] = _pr("absorb")
-    s.results["absorb"].metrics = {"absorb_date": "2024-01-05", "vol_mult": 3.4, "observe_only": True}
+    s.results["vocal"] = _pr("vocal")
+    s.results["vocal"].metrics = {"step": "④ 큰 상승 뒤", "stage": 4}
     html = render(build_payload(scan))
     d = json.loads(html.split("const DATA = ", 1)[1].split(";\n", 1)[0])
-    assert "absorb" in d["stocks"][0]["detected"] and "absorb" in d["chip_patterns"]
-    assert d["observe_patterns"] == ["vocal", "absorb", "stage2"]
-    assert d["stocks"][0]["best"] != "absorb"                                       # 대표 패턴이 되지 않음
-    for needle in ("absorb: {", "stage2: {", "vocal: {", "투매 흡수일", "150일선 돌파일", "깔때기 단계"):
+    assert "vocal" in d["stocks"][0]["detected"] and "vocal" in d["chip_patterns"]
+    assert d["observe_patterns"] == ["day_leader", "vocal"]
+    assert d["base_patterns"] == ["cup_with_handle", "trendline_break", "fib_pullback", "trendline_fib"]
+    for needle in ("vocal: {", "깔때기 단계", "cup_with_handle: {", "피벗 (우측 림 고점)", "식에 손절 규칙이 없어"):
         assert needle in html, needle
+    for gone in ("absorb: {", "stage2: {", "long_base_breakout: {", "big_value_pullback: {", "기술체력"):
+        assert gone not in html, gone
 
 
 # ---------------------------------------------------------------- 휴장일

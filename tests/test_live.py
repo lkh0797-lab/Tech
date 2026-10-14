@@ -60,26 +60,22 @@ def _scan(stocks):
                       patterns=[])
 
 
+CWH = "cup_with_handle"
+
+
 @pytest.fixture
 def scan():
-    bvp = _pr("big_value_pullback", NEAR_PIVOT, 50000, 48500, score=70,
-              metrics={"support": 50000, "buy_zone_top": 51500, "candle_date": "2026-10-01"})
-    lb_watch = _pr("long_base_breakout", FORMING, 12000, 11040, score=55, metrics={"pre_breakout": True})
+    # 손절가가 있는 가상의 베이스 결과(감시 장치 시험용) + 손절 규칙 없는 실제 컵 앤 핸들 모양(000095)
     stocks = [
-        _stock("000010", "돌파주", {"vcp": _pr("vcp", BREAKOUT, 100, 93, breakout_date="2026-10-07")}, 102,
+        _stock("000010", "돌파주", {CWH: _pr(CWH, BREAKOUT, 100, 93, breakout_date="2026-10-07")}, 102,
                df=_df(102, today_close=103, today_vol=99999)),
-        _stock("000020", "근접주", {"cup_handle": _pr("cup_handle", NEAR_PIVOT, 200, 184)}, 196),
-        _stock("000030", "눌림주", {"big_value_pullback": bvp}, 52000),
-        _stock("000040", "관찰주", {"long_base_breakout": lb_watch}, 11500),
-        _stock("000050", "형성주", {"flat_base": _pr("flat_base", FORMING, 300, 276, score=60)}, 280),
-        _stock("000060", "실패주", {"vcp": _pr("vcp", FAILED, 100, 93, breakout_date="2026-10-01")}, 95),
-        _stock("000070", "이격주", {"vcp": _pr("vcp", EXTENDED, 100, 93, breakout_date="2026-10-01")}, 112),
-        _stock("000080", "이탈주", {"vcp": _pr("vcp", BREAKOUT, 100, 93, breakout_date="2026-10-06")}, 92),
-        # 대표는 이격 과다 컵(점수 높음), 장기횡보 돌파 전 관찰이 따로 있음 → 관찰 결과로 감시
-        _stock("000090", "보조관찰", {"cup_handle": _pr("cup_handle", EXTENDED, 80, 74, score=95,
-                                                        breakout_date="2026-10-01"),
-                                  "long_base_breakout": _pr("long_base_breakout", FORMING, 90, 82.8, score=10,
-                                                            metrics={"pre_breakout": True})}, 88),
+        _stock("000020", "근접주", {CWH: _pr(CWH, NEAR_PIVOT, 200, 184)}, 196),
+        _stock("000050", "형성주", {CWH: _pr(CWH, FORMING, 300, 276, score=60)}, 280),
+        _stock("000060", "실패주", {CWH: _pr(CWH, FAILED, 100, 93, breakout_date="2026-10-01")}, 95),
+        _stock("000070", "이격주", {CWH: _pr(CWH, EXTENDED, 100, 93, breakout_date="2026-10-01")}, 112),
+        _stock("000080", "이탈주", {CWH: _pr(CWH, BREAKOUT, 100, 93, breakout_date="2026-10-06")}, 92),
+        _stock("000095", "무손절근접", {CWH: _pr(CWH, NEAR_PIVOT, 500, None)}, 490),
+        _stock("000096", "무손절형성", {CWH: _pr(CWH, FORMING, 500, None)}, 400),
     ]
     return _scan(stocks)
 
@@ -88,19 +84,16 @@ def scan():
 def test_select_watchlist_picks_actionable_and_orders_by_priority(scan):
     items = select_watchlist(scan, 40, today=TODAY)
     by = {it.code: it for it in items}
-    assert set(by) == {"000010", "000020", "000030", "000040", "000050", "000090"}   # 실패·이격·손절 이탈 제외
+    # 실패·이격·손절 이탈 제외, 손절 규칙 없는 형성 중(진입 계획 없음)도 제외
+    assert set(by) == {"000010", "000020", "000050", "000095"}
     assert by["000010"].reason == "돌파" and by["000020"].reason == "피벗 근접"
-    assert by["000030"].reason == "눌림 구간" and by["000040"].reason == "돌파 전 관찰"
     assert by["000050"].reason == "돌파 매수 대기" and by["000050"].plan.startswith("피벗 300 돌파 매수")
-    assert by["000090"].reason == "돌파 전 관찰" and by["000090"].pattern == "long_base_breakout"
-    assert by["000090"].pivot == 90
+    assert by["000095"].reason == "피벗 근접" and by["000095"].stop is None and by["000095"].plan == ""
     pri = [live._PRIORITY[it.reason] for it in items]
     assert pri == sorted(pri)
     assert items[-1].code == "000050"
-    # 눌림목: 50%선·매수 구간 상단 (scoring.pullback_limit / pullback_zone_top 와 같은 값)
-    pb = by["000030"]
-    assert pb.is_pullback and pb.support == 50000 and pb.zone_top == 51500 and pb.stop == 48500
-    assert not by["000010"].is_pullback
+    assert not any(it.is_pullback for it in items)          # 눌림 구간을 채우는 패턴은 지금 없다
+    assert set(live._PRIORITY) == {"지정 종목", "돌파", "피벗 근접", "돌파 매수 대기"}
 
 
 def test_watchlist_volume_and_ref_close_exclude_today(scan):
@@ -121,6 +114,19 @@ def test_watchlist_top_cap_and_requested_codes(scan):
     assert select_watchlist(scan, 0, today=TODAY) == []
 
 
+def test_consumed_breakout_attempt_is_not_watched():
+    """컵 앤 핸들 식: 확인 안 된 돌파 시도(가격만 돌파)로 구조가 끝났으면 '피벗 근접'이어도 감시하지 않는다.
+    장중 잠정 시도(attempt_consumed=False)는 그대로 감시."""
+    done = _stock("000097", "끝난시도", {CWH: _pr(CWH, NEAR_PIVOT, 500, None, metrics={
+        "state": "PRICE_BREAKOUT", "attempt_consumed": True})}, 501)
+    live_try = _stock("000098", "장중시도", {CWH: _pr(CWH, NEAR_PIVOT, 500, None, metrics={
+        "state": "PRICE_BREAKOUT", "attempt_consumed": False, "provisional": True})}, 501)
+    assert live.watch_reason(done, done.lead()) is None
+    assert live.watch_reason(live_try, live_try.lead()) == "피벗 근접"
+    codes = {it.code for it in select_watchlist(_scan([done, live_try]), 40, today=TODAY)}
+    assert codes == {"000098"}
+
+
 def test_avg_volume_needs_history():
     df = _df(100, n=5)
     assert avg_volume(df, TODAY) is None
@@ -139,7 +145,7 @@ def test_projected_volume_uses_session_profile():
 
 # ---------------------------------------------------------------- 알림 규칙
 def item(**kw):
-    base = dict(code="003490", name="대한항공", market="KOSPI", pattern="vcp", label="VCP", stage=NEAR_PIVOT,
+    base = dict(code="003490", name="대한항공", market="KOSPI", pattern=CWH, label="컵 앤 핸들", stage=NEAR_PIVOT,
                 pivot=30900.0, stop=28700.0, reason="피벗 근접", composite=80.0, ref_close=30500.0,
                 avg_vol_50=1_000_000.0)
     base.update(kw)
@@ -201,13 +207,14 @@ def test_already_above_pivot_needs_dip_before_breakout_alert(tmp_path):
 
 
 def test_pullback_zone_and_close_based_stop(tmp_path):
-    pb = item(code="000030", name="눌림주", pattern="big_value_pullback", label="300억 눌림목", pivot=50000.0,
+    pb = item(code="000030", name="눌림주", pattern="t_pullback", label="시험 눌림 구간", pivot=50000.0,
               stop=48500.0, support=50000.0, zone_top=51500.0, reason="눌림 구간", ref_close=52000.0)
     eng = TriggerEngine([pb], AlertStore(tmp_path, TODAY))
     assert eng.on_tick(tick("000030", 52000, at(9, 30))) == []
     a = eng.on_tick(tick("000030", 51000, at(10, 0)))
     assert [x.kind for x in a] == [PULLBACK]
-    assert "50%선 매수 구간 50,000~51,500 진입" in a[0].text and "손절: 종가 48,500 이탈" in a[0].text
+    assert "매수 구간 50,000~51,500 진입" in a[0].text and "50%선" not in a[0].text
+    assert "손절: 종가 48,500 이탈" in a[0].text
     assert "잠정" in a[0].text
     s = eng.on_tick(tick("000030", 48400, at(11, 0)))
     assert [x.kind for x in s] == [STOP] and "종가 기준" in s[0].text and "잠정" in s[0].text
@@ -228,8 +235,8 @@ def test_stop_alert_needs_a_cross_from_above(tmp_path):
 
 
 def test_buy_stop_candidates_below_stop_are_not_watched():
-    below = _stock("000100", "손절아래", {"flat_base": _pr("flat_base", FORMING, 300, 276, score=60)}, 250)
-    above = _stock("000101", "손절위", {"flat_base": _pr("flat_base", FORMING, 300, 276, score=60)}, 280)
+    below = _stock("000100", "손절아래", {CWH: _pr(CWH, FORMING, 300, 276, score=60)}, 250)
+    above = _stock("000101", "손절위", {CWH: _pr(CWH, FORMING, 300, 276, score=60)}, 280)
     assert below.position["plan"].startswith("피벗 300 돌파 매수")
     assert [it.code for it in select_watchlist(_scan([below, above]), 40, today=TODAY)] == ["000101"]
 
@@ -609,7 +616,7 @@ def _d(y, mo, d, h, mi, s=0):
 
 
 def _pullback_item(**kw):
-    base = dict(code="000030", name="눌림주", pattern="big_value_pullback", label="300억 눌림목", pivot=50000.0,
+    base = dict(code="000030", name="눌림주", pattern="t_pullback", label="시험 눌림 구간", pivot=50000.0,
                 stop=48500.0, support=50000.0, zone_top=51500.0, reason="눌림 구간", ref_close=51000.0)
     base.update(kw)
     return item(**base)
@@ -653,8 +660,8 @@ def test_preopen_and_zero_volume_ticks_are_display_only(tmp_path):
 
 
 def _vitzro(**kw):
-    """리뷰 실사례: 장기횡보 돌파 뒤라 손절가(10,140)가 피벗(9,880)보다 위."""
-    base = dict(code="042370", name="비츠로테크", pattern="long_base_breakout", label="장기횡보 돌파",
+    """리뷰 실사례(옛 장기횡보 돌파 탐지기 — 2026-10-14 제거): 손절가(10,140)가 피벗(9,880)보다 위인 감시 항목."""
+    base = dict(code="042370", name="비츠로테크", pattern="t_case", label="시험 (손절가 > 피벗)",
                 stage=NEAR_PIVOT, pivot=9880.0, stop=10140.0, ref_close=10510.0, reason="피벗 근접",
                 plan="돌파 확인 — 현재가 10,510 매수 (피벗 9,880)")
     base.update(kw)

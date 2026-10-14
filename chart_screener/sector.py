@@ -13,7 +13,7 @@
 
 그룹 지표 (유동 구성 종목 기준)
     median_rs       RS 레이팅 중앙값 (1~99)
-    tt_pass_pct     미너비니 트렌드 템플릿 8개 기준 모두 충족 비율 (patterns.trend_template 과 같은 규칙,
+    tt_pass_pct     미너비니 트렌드 템플릿 8개 기준 모두 충족 비율 (trend.evaluate 와 같은 규칙 — 패턴 칩 아님,
                     이동평균은 마지막 봉에서만 numpy 로 계산해 빠르게)
     new_highs_20d   최근 20봉 안에 52주(252봉) 신고가를 낸 종목 수
     big_value_today 오늘 거래대금 300억↑ 이면서 +3%↑ 상승 마감한 종목 수 (자금 유입)
@@ -40,7 +40,8 @@ import numpy as np
 import pandas as pd
 
 from .config import Config
-from .patterns.trend_template import TrendTemplateConfig
+from .trend import CFG_KEY as TT_KEY
+from .trend import TrendTemplateConfig
 from .universe_data import build_context, passes_universe_filter
 
 KIND_SECTOR, KIND_THEME = "업종", "테마"
@@ -76,7 +77,7 @@ def empty_strength() -> pd.DataFrame:
 # ---------------------------------------------------------------- 종목별 지표
 def tt_pass(close: np.ndarray, high: np.ndarray, low: np.ndarray, rs: float | None,
             cfg: TrendTemplateConfig | None = None) -> bool:
-    """마지막 봉 기준 트렌드 템플릿 8개 기준 모두 충족 여부 (trend_template.evaluate 와 같은 규칙)."""
+    """마지막 봉 기준 트렌드 템플릿 8개 기준 모두 충족 여부 (trend.evaluate 와 같은 규칙)."""
     cfg = cfg or TrendTemplateConfig()
     d = cfg.sma200_rising_days
     if len(close) < 200 + d or rs is None or not rs >= cfg.rs_min:
@@ -95,7 +96,7 @@ def stock_metrics(ud, cfg: Config | None = None, scfg: SectorConfig | None = Non
     컬럼: name, market, rs, tt_pass, new_high_20d, big_up_today, chg_1d, ret_20d, value_today"""
     cfg = cfg or Config()
     scfg = scfg or SectorConfig()
-    tt_cfg = cfg.pattern_cfg("trend_template", TrendTemplateConfig)
+    tt_cfg = cfg.pattern_cfg(TT_KEY, TrendTemplateConfig)
     big = cfg.big_value_threshold
     asof = getattr(ud, "asof", None)
     rows = {}

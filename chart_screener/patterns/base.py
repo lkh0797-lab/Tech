@@ -60,7 +60,7 @@ def marker(date, text: str, position: str = "above", color: str = "#e91e63", sha
 # ---------------------------------------------------------------- 결과 타입
 @dataclass
 class PatternResult:
-    name: str                       # 'vcp', 'cup_handle', ...
+    name: str                       # 'cup_with_handle', 'vocal', ...
     label: str                      # 한글 표시명
     detected: bool = False
     score: float = 0.0              # 0~100 품질 점수
@@ -77,7 +77,9 @@ class PatternResult:
 
     @property
     def stage_label(self) -> str:
-        return STAGE_LABELS.get(self.stage or "", "-")
+        """단계 이름. 기법이 metrics['stage_label'] 을 주면 그것 — 피벗 없는 결과(10% 주도주 관찰일 · 피보 신호 전 접촉)는
+        단계 값(stage)은 점수용으로 near_pivot 을 쓰되 '피벗 근접'이라 부르지 않는다(가리킬 피벗이 없다)."""
+        return str((self.metrics or {}).get("stage_label") or STAGE_LABELS.get(self.stage or "", "-"))
 
     def to_dict(self) -> dict:
         d = asdict(self)

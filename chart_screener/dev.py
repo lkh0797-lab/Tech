@@ -1,8 +1,8 @@
 """개발/보정용 하네스: 캐시된 전 종목에 탐지기 하나를 돌려 통계를 출력.
 
-    python -m chart_screener.dev vcp --top 20
-    python -m chart_screener.dev cup_handle --show 005930
-    python -m chart_screener.dev base_breakout --stage breakout --no-filter
+    python -m chart_screener.dev cup_with_handle --top 20
+    python -m chart_screener.dev cup_with_handle --show 005930
+    python -m chart_screener.dev cup_with_handle --stage breakout --no-filter
 
 네트워크를 쓰지 않는다(--online 지정 시 제외). 먼저 한 번은 온라인으로 데이터를 받아 두어야 한다.
 """

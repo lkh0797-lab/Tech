@@ -119,6 +119,24 @@ def test_stage_mode_new_pivot_is_new_signal_and_first_entries_collapses(ud, monk
     assert s.attrs.get("first_entry") and s["신호수"].iloc[0] == 2
 
 
+def test_no_stop_pattern_has_no_stop_share(ud, monkeypatch):
+    """손절 규칙 없는 식(컵 앤 핸들): 'stop' 이 나올 수 없으니 손절 0% 로 찍지 않고 '해당 없음'으로 따로 센다."""
+    def nostop(ctx):
+        return PatternResult(name="fake", label="가짜", detected=True, score=50.0, stage=NEAR_PIVOT, pivot=12_345.0,
+                             stop=None, start_date="2023-11-01", end_date=ctx.date(-1))
+    monkeypatch.setitem(REGISTRY, "fake", ("가짜", nostop))
+    bt = BacktestConfig(pattern="fake", mode="stage", step=1, stages=(NEAR_PIVOT,), min_bars=260)
+    ev = pd.DataFrame(_events_for("AAA", bt, Config(), ud, {}))
+    assert len(ev) and (~ev["has_stop"]).all() and "stop" not in set(ev["outcome"])
+    s = summarize(ev, (5, 20))
+    assert "outcome" not in s.attrs and s.attrs["no_stop"]["n"] == len(ev)
+    mixed = pd.concat([ev, ev.assign(has_stop=True, outcome="stop")], ignore_index=True)
+    s = summarize(mixed, (5, 20))
+    assert s.attrs["outcome"] == {"stop": 100.0} and s.attrs["outcome_n"] == len(ev) and s.attrs["no_stop"]["n"] == len(ev)
+    old = ev.drop(columns="has_stop").assign(outcome="open")    # has_stop 칸 없는 옛 이벤트 CSV — 예전처럼 전부 센다
+    assert summarize(old, (5,)).attrs["outcome"] == {"open": 100.0}
+
+
 def test_stage_filter_respected(ud, monkeypatch):
     monkeypatch.setitem(REGISTRY, "fake", ("가짜", _fake(stage="forming")))
     bt = BacktestConfig(pattern="fake", mode="stage", step=1, stages=(NEAR_PIVOT,), min_bars=260)
@@ -144,6 +162,21 @@ def test_breakout_day_mode_and_index_benchmark(ud, monkeypatch):
     assert list(out["신호수"]) == [1, 1]
 
 
+def test_until_drops_later_bars_from_signals_and_returns(ud, monkeypatch):
+    """until(포함) 뒤 봉(장중 미완성 봉 등)은 신호 · 진입 · 수익 계산에 안 쓴다."""
+    t = 300
+    bo = f"{DATES[t]:%Y-%m-%d}"
+    monkeypatch.setitem(REGISTRY, "fake", ("가짜", _fake(breakout=lambda ctx: bo if ctx.date(-1) >= bo else None)))
+    full = BacktestConfig(pattern="fake", mode="breakout_day", min_bars=260, prefilter=False, horizons=(5, 20))
+    e = _events_for("BBB", full, Config(), ud, {})[0]
+    assert np.isfinite(e["ret_20"])
+    cut = BacktestConfig(**{**full.__dict__, "until": f"{DATES[t + 10]:%Y-%m-%d}"})
+    e2 = _events_for("BBB", cut, Config(), ud, {})[0]
+    assert e2["date"] == bo and e2["ret_5"] == pytest.approx(e["ret_5"]) and not np.isfinite(e2["ret_20"])
+    early = BacktestConfig(**{**full.__dict__, "until": f"{DATES[t]:%Y-%m-%d}"})   # 신호 봉이 마지막 봉 → 다음 봉 없음
+    assert _events_for("BBB", early, Config(), ud, {}) == []
+
+
 def test_index_benchmark_falls_back_to_close_without_open(ud, monkeypatch):
     t = 270
     bo = f"{DATES[t]:%Y-%m-%d}"
@@ -157,17 +190,29 @@ def test_index_benchmark_falls_back_to_close_without_open(ud, monkeypatch):
 
 
 # ---------------------------------------------------------------- 사전 필터
-def test_prefilter_kinds():
+def test_prefilter_kinds(monkeypatch):
     c = np.array([100, 101, 102, 103, 102.5, 80, 104, 103.9], float)
     h = c * 1.01
-    near_up = _maybe_breakout_day("vcp", h, c)
-    near_any = _maybe_breakout_day("cup_handle", h, c)
-    assert not near_up[4] and near_any[4]          # 고점 근처 하락 마감: 거래량 게이트 패턴만 후보
+    # 필터 종류 자체 (검증된 패턴이 쓰는 도구) — 가짜 패턴 키로 시험
+    monkeypatch.setitem(bt_mod.PREFILTER, "t_up", ("near_high_up", 0.84))
+    monkeypatch.setitem(bt_mod.PREFILTER, "t_any", ("near_high", 0.85))
+    monkeypatch.setitem(bt_mod.PREFILTER, "t_chg", ("chg", 0.069))
+    near_up = _maybe_breakout_day("t_up", h, c)
+    near_any = _maybe_breakout_day("t_any", h, c)
+    assert not near_up[4] and near_any[4]          # 고점 근처 하락 마감: 상승 마감 조건 없는 필터만 후보
     assert not near_any[5]                         # 고점에서 먼 날은 둘 다 제외
     assert near_up[6] and near_any[6]
-    assert _maybe_breakout_day("big_value_pullback", h, c).all()
-    unknown = _maybe_breakout_day("no_such_pattern", h, c)
-    assert (unknown == near_any).all()             # 모르는 패턴 = 고점 근접(0.85)만
-    lbb = _maybe_breakout_day("long_base_breakout", h, np.array([100, 107.5, 108, 120], float))
-    assert list(lbb) == [False, True, False, True]
-    assert set(bt_mod.PREFILTER) >= {"cup_handle", "canslim", "big_value_pullback", "vcp"}
+    chg = _maybe_breakout_day("t_chg", h, np.array([100, 107.5, 108, 120], float))
+    assert list(chg) == [False, True, False, True]
+
+
+def test_prefilter_after_pattern_reset():
+    # 2026-10-14: 옛 패턴의 검증된 필터는 패턴과 함께 지웠다. 컵 앤 핸들 · 모르는 패턴은 필터 없이 매일 판정
+    c = np.array([100, 101, 102, 103, 102.5, 80, 104, 103.9], float)
+    # 《차트의 기술》 기법은 규칙상 꼭 성립하는 조건만 쓴 상위 집합 필터 (놓침 없음 — test_technique_integration 이 실제 탐지기로 확인)
+    assert set(bt_mod.PREFILTER) == {"cup_with_handle", "trendline_break", "fib_pullback", "trendline_fib",
+                                     "ma60_supply", "red_three_monthly"}
+    assert bt_mod.PREFILTER["cup_with_handle"] == ("none", None)
+    assert _maybe_breakout_day("cup_with_handle", c * 1.01, c).all()
+    assert _maybe_breakout_day("no_such_pattern", c * 1.01, c).all()
+    assert _maybe_breakout_day("fib_pullback", c * 1.01, c).all()      # df 가 필요한 필터는 df 없으면 필터 없음

@@ -640,7 +640,7 @@ def fetch_flows(client, codes: Iterable[str], cache: KISDayCache | None = None, 
 
 
 def flows_frame(fl: Flows, foreign_ratio: float | None = None) -> pd.DataFrame:
-    """Flows → data.investor 와 같은 모양의 DataFrame (scanner·CAN SLIM I 가 그대로 쓴다).
+    """Flows → data.investor 와 같은 모양의 DataFrame (scanner.investor_summary 가 그대로 쓴다).
 
     DatetimeIndex 'date' 오름차순, 열 = investor.COLUMNS:
       close(종가) · volume(NaN — 이 API 에 없음) · inst_net(기관 순매매, 주) · foreign_net(외국인, 주)

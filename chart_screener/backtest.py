@@ -1,13 +1,18 @@
 """워크포워드 이벤트 스터디: 과거 각 시점까지의 데이터만 잘라 탐지기를 돌리고, 신호 이후 수익률을 측정.
 
-    python -m chart_screener backtest vcp                    # 돌파 당일 신호 (기본)
-    python -m chart_screener backtest vcp --mode stage --stages near_pivot --step 5
+    python -m chart_screener backtest cup_with_handle        # 돌파 당일 신호 (기본, 매일 판정 — 오래 걸림)
+    python -m chart_screener backtest cup_with_handle --mode stage --stages near_pivot --step 5
 
 방법
 - 각 종목의 일봉을 시점 t 까지 잘라(df.iloc[:t+1]) StockContext 를 만들고 탐지기를 실행한다.
   RS 레이팅·지수·시장 상태·거래정지일도 t 시점까지만 쓴다 → 미래 참조 없음.
-- 신호 (mode='breakout_day', 기본): 매 거래일(step=1) 탐지기를 실행해, 그날이 곧 돌파일
-  (result.breakout_date == t) 인 경우만 집계. 돌파 당일 바로 이격 과다(+5% 초과)가 된 강한 돌파도 포함된다.
+- 신호 (mode='breakout_day', 기본): 매 거래일(step=1) 탐지기를 실행해, 그날이 곧 신호일
+  (event_date(패턴, 결과) == t) 인 경우만 집계. 돌파 당일 바로 이격 과다(+5% 초과)가 된 강한 돌파도 포함된다.
+  신호일 = 그 판정이 처음 알려지는 봉 — 대부분 breakout_date, 빗각 추세선 돌파는 안착 확인 봉(metrics.break.conf_date —
+  breakout_date 는 돌파일 t0 이라 확인이 늦으면 그날 알 수 없다), 월봉 적삼병은 확정 봉(metrics.known_date — 다음 달 첫 거래일).
+  10% 주도주는 돌파일이 없는 관찰 칩이라 stage 모드(--stages near_pivot = 신호 봉)만 된다.
+- 손절 (has_stop · outcome 'stop') 은 STOP_RULE: 피보 계열 = 저가 ≤ 고정 손절(다음 깊은 라인), 빗각 추세선 돌파 =
+  종가 ≤ 그날 동결 선 값(움직이는 선 — '선 아래 재하락 = 실패'), 컵 앤 핸들 · 60일선 · 적삼병 · 10% 주도주 = 손절 규칙 없음.
   (mode='stage'): step 간격으로 실행해 stage ∈ stages 이면 신호. 같은 패턴(키 = (돌파일 또는 패턴 시작일,
   반올림 피벗))은 종목당 1회만 집계한다 — 형성 중 패턴은 end_date 가 매일 바뀌므로 키에 쓰지 않는다.
   눌림목형 패턴(피벗이 매일 움직일 수 있음)은 ``first_entries`` 로 (종목, 시작일)당 첫 신호만 남겨 요약한다.
@@ -53,6 +58,7 @@ class BacktestConfig:
     target: float = 0.20
     history_days: int | None = None          # 캐시에서 쓸 일봉 수 (None = Config 기본 3년). 더 긴 검증: --years
     prefilter: bool = True                   # 돌파일 사전 필터 (breakout_day 모드)
+    until: str | None = None                 # 이 날짜(포함)까지의 봉만 — 그 뒤 봉(장중 미완성 봉 등)은 신호 · 수익 계산에서 뺀다
 
 
 def market_states_by_date(ud: UniverseData, since: pd.Timestamp) -> dict[str, dict[pd.Timestamp, object]]:
@@ -108,44 +114,130 @@ def _context_at(code: str, df: pd.DataFrame, t: int, ud: UniverseData, cfg: Conf
     )
 
 
-# 돌파일 사전 필터 — 각 패턴 규칙상 돌파일이 될 수 없는 날은 탐지기를 생략한다(속도 최적화).
+# 돌파일 사전 필터 — 패턴 규칙상 돌파일이 될 수 없는 날은 탐지기를 생략한다(속도 최적화).
 #  종류: 'chg'(등락률 ≥ x) · 'up'(상승 마감) · 'near_high_up'(상승 마감 & 종가 ≥ 직전 20봉 최고가 × x)
 #        · 'near_high'(종가 ≥ 직전 20봉 최고가 × x, 상승 마감 불필요) · 'none'(필터 없음, 매일 실행)
-#  - 장기횡보 돌파: 전일 대비 +7% 이상이 필수 규칙 → 등락률 ≥ +6.9%
-#  - 포켓 피벗: 상승 마감이 필수 → 상승일
-#  - VCP: 피벗(최종 수축 고점)은 베이스 고점 대비 -15% 이내 → 상승 & 종가 ≥ 최근 20봉 최고가 × 0.84
-#  - 컵앤핸들·CAN SLIM: 돌파 거래량 미달 봉은 돌파로 치지 않으므로, 거래량을 갖춘 '첫' 돌파봉이
-#    하락 마감일 수 있다 → 상승 마감 조건 없이 고점 근접만 본다
-#  - 그 밖의 베이스: 피벗이 베이스 상단 근처(찌르기·스파이크 여유 포함) → 상승 & 종가 ≥ 최근 20봉 최고가 × 0.85
-#  - 300억 장대양봉 눌림목: 돌파가 아닌 눌림 매수 셋업 → 필터 없음
-#  - 표에 없는 패턴: 가장 느슨한 고점 근접(0.85)만 적용
-# scripts_validate_prefilter.py: 표본 45종목×9패턴에서 필터 유무의 신호 집합이 동일함을 확인했다.
-# (컵앤핸들·CAN SLIM 은 상승 마감 조건을 뺀 뒤 재검증: 14/14·118/118 동일. 전 종목 컵앤핸들에서
-#  구 필터가 놓친 하락 마감 돌파 5건이 복구됨.)
+#  필터는 '그 패턴의 신호를 하나도 놓치지 않는다'를 검증한 뒤에만 넣는다. 2026-10-14 패턴 초기화로 옛 패턴의 검증된 필터는
+#  패턴과 함께 지웠고, 검증 전 패턴(표에 없는 패턴 포함)은 필터 없이 매일 판정한다(느리지만 신호를 놓치지 않는다).
+#  - 컵 앤 핸들(사용자 식): 돌파 시도 = 그날 고가가 확인된 우측 림 위 — 직전 20봉 최고가 기준 필터는 우측 림이 20봉보다
+#    앞이거나 컵 안 고가가 림보다 높은 경우를 놓칠 수 있어 쓰지 않는다.
+#  《차트의 기술》 기법(2026-10-14) — 규칙상 꼭 성립하는 조건만 쓴 '상위 집합' 필터(신호를 놓치지 않음, 시험 test_technique_integration):
+#   'white'       양봉 C > O — 피보 반등 신호 봉은 늘 양봉(부록 §3.1, 장대양봉 · 반등 양봉 모두)
+#   'series'      패턴 모듈의 stage_series(df)(상태 기계 한 번 — 봉마다 detect(df[:t+1]) 와 같음을 패턴 시험이 확인)에서
+#                 돌파 · 신호 뒤 단계(breakout_i 있음)인 날만. 빗각 · 빗각+피보는 날마다 봉 0 부터 다시 돌면 O(n²)
+#   'ma_cross'    종가가 x일 SMA 를 아래에서 위로(상대 1e-6 여유 — tq.cross_above 의 1e-9 경계를 품음)
+#   'month_first' 그 달의 첫 거래 봉(앞선 같은 달 봉이 모두 거래량 0 이면 그다음 봉까지) — 월봉 적삼병 신호가 처음 보이는 봉
+#                 ('next_bar' 완성 규칙일 때만 — 'calendar' 설정이면 필터 없음)
 PREFILTER: dict[str, tuple[str, float | None]] = {
-    "long_base_breakout": ("chg", 0.069),
-    "pocket_pivot": ("up", None),
-    "vcp": ("near_high_up", 0.84),
-    "cup_handle": ("near_high", 0.85),
-    "canslim": ("near_high", 0.85),
-    "flat_base": ("near_high_up", 0.85),
-    "double_bottom": ("near_high_up", 0.85),
-    "three_weeks_tight": ("near_high_up", 0.85),
-    "high_tight_flag": ("near_high_up", 0.85),
-    "big_value_pullback": ("none", None),
+    "cup_with_handle": ("none", None),
+    "trendline_break": ("series", None),
+    "fib_pullback": ("white", None),
+    "trendline_fib": ("series", None),
+    "ma60_supply": ("ma_cross", 60),
+    "red_three_monthly": ("month_first", None),
 }
-DEFAULT_PREFILTER: tuple[str, float | None] = ("near_high", 0.85)
+DEFAULT_PREFILTER: tuple[str, float | None] = ("none", None)
+# breakout_day 모드를 쓸 수 없는 패턴 — 돌파일(breakout_date)이 없다
+NO_BREAKOUT_DAY = {
+    "day_leader": "10% 주도주는 피벗 · 돌파일이 없는 관찰 칩(분봉 진입) — --mode stage --stages near_pivot 로 신호 봉"
+                  "(다음 날 시가 진입)만 잴 수 있다. 영상의 분봉 단타 진입이 아니다.",
+}
+# 손절 판정 — 'low' 저가 ≤ 고정 손절가(r.stop) · 'close_line' 종가 ≤ 그날 동결 추세선 값(metrics.line) · None 손절 규칙 없음.
+# 표에 없는 패턴은 손절가가 있으면 'low'.
+STOP_RULE: dict[str, str | None] = {
+    "cup_with_handle": None,          # 식에 손절 규칙 없음
+    "trendline_break": "close_line",  # '선 아래 재하락 = 실패' (영상 [55:00–56:00] · 부록 §4.4) — 종가 기준, 선은 날마다 내려감
+    "fib_pullback": "low",            # 다음 깊은 라인 (BabyPips · 부록 §3.1) — 기계의 손절과 같은 저가 기준
+    "trendline_fib": "low",
+    "ma60_supply": None,              # 영상의 이 부분은 손절을 말하지 않는다
+    "red_three_monthly": None,        # 확정 저점은 구조 무효선 — 손절 규칙 아님
+    "day_leader": None,               # 분봉 기준선 이탈(HTS) — 일봉 손절 없음
+}
 
 
-def _maybe_breakout_day(pattern: str, h: np.ndarray, c: np.ndarray) -> np.ndarray:
-    n = len(c)
+def event_date(pattern: str, r) -> str | None:
+    """breakout_day 모드의 신호일 — 그 판정이 처음 알려지는 봉 (위 docstring)."""
+    m = getattr(r, "metrics", None) or {}
+    if pattern == "trendline_break":
+        return (m.get("break") or {}).get("conf_date") if r.breakout_date else None
+    if pattern == "red_three_monthly":
+        return m.get("known_date") if r.breakout_date else None
+    return r.breakout_date
+
+
+def stop_rule(pattern: str, r) -> str | None:
+    rule = STOP_RULE.get(pattern, "low")
+    if rule == "close_line":
+        ln = (getattr(r, "metrics", None) or {}).get("line") or {}
+        ok = all(_finite(ln.get(k)) for k in ("anchor_i", "anchor_price", "slope_ln"))
+        return "close_line" if ok else ("low" if r.stop and r.stop > 0 else None)
+    if rule == "low":
+        return "low" if r.stop and r.stop > 0 else None
+    return None
+
+
+def _finite(x) -> bool:
+    try:
+        return math.isfinite(float(x))
+    except (TypeError, ValueError):
+        return False
+
+
+def _line_value(ln: dict, i: int) -> float:
+    """동결 추세선의 봉 i 값 (tq.TrendLine.value 와 같은 로그 직선)."""
+    return float(ln["anchor_price"]) * math.exp(float(ln["slope_ln"]) * (i - int(ln["anchor_i"])))
+
+
+def _prefilter_kind(pattern: str) -> tuple[str, float | None]:
     kind, x = PREFILTER.get(pattern, DEFAULT_PREFILTER)
+    if kind == "month_first":
+        try:
+            from .patterns import red_three_monthly as rtm
+            if Config().pattern_cfg(rtm.NAME, rtm.RedThreeConfig).complete_rule != "next_bar":
+                return "none", None
+        except Exception:
+            return "none", None
+    return kind, x
+
+
+def _series_mask(pattern: str, df: pd.DataFrame) -> np.ndarray | None:
+    import importlib
+    try:
+        mod = importlib.import_module(REGISTRY[pattern][1].__module__)
+        ser = mod.stage_series(df)
+    except Exception:
+        return None
+    if len(ser) != len(df):
+        return None
+    return np.array([x is not None and x.get("breakout_i") is not None for x in ser], bool)
+
+
+def _maybe_breakout_day(pattern: str, h: np.ndarray, c: np.ndarray, df: pd.DataFrame | None = None) -> np.ndarray:
+    """돌파 · 신호일이 될 수 있는 날 (True). df 가 필요한 필터(white · series · month_first)는 df 가 없으면 필터 없음."""
+    n = len(c)
+    kind, x = _prefilter_kind(pattern)
     if kind == "none":
         return np.ones(n, bool)
     prev = np.r_[np.nan, c[:-1]]
     with np.errstate(invalid="ignore", divide="ignore"):
         if kind == "chg":
             return c / prev - 1 >= x
+        if kind == "ma_cross":
+            sma = pd.Series(c).rolling(int(x or 60)).mean().to_numpy()
+            ps = np.r_[np.nan, sma[:-1]]
+            return (c > sma * (1 - 1e-6)) & (prev <= ps * (1 + 1e-6))
+        if kind in ("white", "series", "month_first"):
+            if df is None or len(df) != n:
+                return np.ones(n, bool)
+            if kind == "white":
+                return c > df["open"].to_numpy(float)
+            if kind == "series":
+                m = _series_mask(pattern, df)
+                return m if m is not None else np.ones(n, bool)
+            per = df.index.to_period("M")
+            nz = pd.Series(df["volume"].to_numpy(float) > 0, index=df.index)
+            before = nz.groupby(per).cumsum() - nz          # 같은 달 앞선 봉 중 거래량 > 0 인 수
+            return (before == 0).to_numpy()
         up = c > prev
         if kind == "up":
             return up
@@ -163,6 +255,8 @@ def _dedupe_key(r, date: pd.Timestamp) -> tuple:
 
 def _events_for(code: str, bt: BacktestConfig, cfg: Config, ud: UniverseData, mkt: dict) -> list[dict]:
     df = ud.ohlcv[code]
+    if bt.until:
+        df = df.loc[:pd.Timestamp(bt.until)]
     n = len(df)
     fn = REGISTRY[bt.pattern][1]
     since = pd.Timestamp(bt.since) if bt.since else None
@@ -176,7 +270,7 @@ def _events_for(code: str, bt: BacktestConfig, cfg: Config, ud: UniverseData, mk
                 else np.full(n, np.nan))
     st = _Static(code, ud, mkt)
     use_pf = bt.mode == "breakout_day" and bt.prefilter
-    cand = _maybe_breakout_day(bt.pattern, h, c) if use_pf else np.ones(n, bool)
+    cand = _maybe_breakout_day(bt.pattern, h, c, df) if use_pf else np.ones(n, bool)
     seen: set = set()
     events = []
     for t in range(bt.min_bars, n - 1, bt.step):
@@ -188,7 +282,7 @@ def _events_for(code: str, bt: BacktestConfig, cfg: Config, ud: UniverseData, mk
         if not r.detected:
             continue
         if bt.mode == "breakout_day":
-            if r.breakout_date != df.index[t].strftime("%Y-%m-%d"):
+            if event_date(bt.pattern, r) != df.index[t].strftime("%Y-%m-%d"):
                 continue
         elif r.stage not in bt.stages:
             continue
@@ -210,17 +304,25 @@ def _events_for(code: str, bt: BacktestConfig, cfg: Config, ud: UniverseData, mk
                 ev[f"mae_{hz}"] = l[t + 1:j + 1].min() / entry - 1
             else:
                 ev[f"ret_{hz}"] = ev[f"idx_{hz}"] = ev[f"mae_{hz}"] = np.nan
-        # 손절 전 +target 도달 여부 (최대 마지막 horizon 까지)
+        # 손절 전 +target 도달 여부 (최대 마지막 horizon 까지). 손절 규칙 없는 식(컵 앤 핸들 등)은 'stop' 이 나올 수 없으므로
+        # has_stop=False 로 따로 표시 — summarize 가 손절 비율을 손절가 있는 신호로만 낸다(0% 로 섞지 않게).
+        # 손절 판정은 패턴마다(STOP_RULE): 저가 ≤ 고정 손절가, 또는 종가 ≤ 그날 동결 추세선 값.
+        rule = stop_rule(bt.pattern, r)
+        has_stop = rule is not None
+        ln = (r.metrics or {}).get("line") if rule == "close_line" else None
         horizon_end = min(n, t + 1 + max(bt.horizons))
         outcome = "open"
         for j in range(t + 1, horizon_end):
-            if r.stop and l[j] <= r.stop:
+            if (rule == "low" and l[j] <= r.stop) or (rule == "close_line" and c[j] <= _line_value(ln, j)):
                 outcome = "stop"
                 break
             if h[j] >= entry * (1 + bt.target):
                 outcome = "target"
                 break
         ev["outcome"] = outcome
+        ev["has_stop"] = has_stop
+        ev["stop_rule"] = rule or ""
+        ev["event_date"] = event_date(bt.pattern, r) if bt.mode == "breakout_day" else None
         events.append(ev)
     return events
 
@@ -263,12 +365,11 @@ def run_backtest(bt: BacktestConfig, workers: int | None = None, codes: list[str
     if bt.pattern == "vocal":
         raise ValueError("보컬은 날마다 전 시장 단면(거래대금 순위 · 테마 강도 · 대장)이 필요해 이 백테스트로는 잴 수 없다 — "
                          "검증은 기업추적 도구/보컬_백테스트.py (README '보컬 눌림목' 참고)")
+    if bt.mode == "breakout_day" and bt.pattern in NO_BREAKOUT_DAY:
+        raise ValueError(NO_BREAKOUT_DAY[bt.pattern])
     if bt.pattern == "undervalued":
         raise ValueError("저평가 종목은 기업추적 저평가 목록(외부 파일, 그날 하루치)을 붙이는 정보 칩이라 과거 날짜로 잴 수 없다 — "
                          "검증은 기업추적 도구/저평가V2_백테스트.py")
-    if bt.pattern == "absorb" and (bt.mode != "stage" or not {"near_pivot", "forming"} & set(bt.stages)):
-        raise ValueError("바닥 투매 흡수는 돌파일이 없는 관찰 패턴(단계는 near_pivot · forming 만)이라 돌파일 모드나 "
-                         "--stages breakout 으로는 신호가 생기지 않는다 — --mode stage --stages near_pivot,forming 으로 재라")
     ud = load_universe_data(_cfg(bt.history_days), offline=True, verbose=False)
     first = min(d.index[0] for d in ud.ohlcv.values())
     since = bt.since or str((first + pd.tseries.offsets.BDay(bt.min_bars)).date())
@@ -299,7 +400,7 @@ def run_backtest(bt: BacktestConfig, workers: int | None = None, codes: list[str
 def first_entries(events: pd.DataFrame) -> pd.DataFrame:
     """stage 모드 보조: (종목, 패턴 시작일)마다 가장 이른 신호 1건만 남긴다.
 
-    눌림목형 패턴(예: 300억 장대양봉 눌림목)은 같은 장대양봉에 대해 지지선·피벗이 매일 조금씩 달라져
+    눌림목형 패턴(예: 2026-10-14 제거된 300억 장대양봉 눌림목)은 같은 기준봉에 대해 지지선·피벗이 매일 조금씩 달라져
     dedupe 키가 여러 번 생길 수 있다 → '처음 진입 가능했던 날' 한 번만 성과에 넣는다.
     start_date 가 없으면 돌파일, 그것도 없으면 신호일을 시작일로 본다."""
     if events.empty:
@@ -339,6 +440,14 @@ def summarize(events: pd.DataFrame, horizons=(5, 20, 60)) -> pd.DataFrame:
         })
     out = pd.DataFrame(rows)
     if not events.empty and "outcome" in events:
-        oc = events["outcome"].value_counts(normalize=True)
-        out.attrs["outcome"] = {k: round(v * 100, 1) for k, v in oc.items()}
+        # 손절 비율은 손절가가 있는 신호로만 — 손절 규칙 없는 식의 신호를 '손절 0%' 로 섞지 않는다
+        hs = (events["has_stop"].fillna(True).astype(bool) if "has_stop" in events
+              else pd.Series(True, index=events.index))
+        if hs.any():
+            oc = events.loc[hs, "outcome"].value_counts(normalize=True)
+            out.attrs["outcome"] = {k: round(v * 100, 1) for k, v in oc.items()}
+            out.attrs["outcome_n"] = int(hs.sum())
+        if (~hs).any():
+            tg = (events.loc[~hs, "outcome"] == "target").mean()
+            out.attrs["no_stop"] = {"n": int((~hs).sum()), "target": round(tg * 100, 1)}
     return out

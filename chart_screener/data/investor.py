@@ -1,11 +1,11 @@
 """종목별 투자자(기관·외국인·개인) 일별 순매매 — 네이버 모바일 증권 API + 디스크 캐시.
 
-CAN SLIM 의 I(기관 수요)를 실제 수급으로 보강하기 위한 자료다. 요청 수를 아끼기 위해
-리포트 단계에서 '후보 종목'에만 호출한다 (전 종목 스캔에 쓰지 말 것).
+리포트 '수급 20일'(기관 · 외국인 순매수) 표시용 자료다 — 종합 점수에는 안 쓴다(2026-10-14 까지는 옛 CAN SLIM 의 I 점수에도
+썼다). 요청 수를 아끼기 위해 리포트 단계에서 '후보 종목'에만 호출한다 (전 종목 스캔에 쓰지 말 것).
 
     from chart_screener.data.investor import attach_investor, get_investor
     df = get_investor("005930", days=60)          # 캐시 우선, 필요 시 1~2회 요청
-    attach_investor(ctx)                          # ctx.info["investor"] = df → patterns.canslim 의 I 점수에 반영
+    attach_investor(ctx)                          # ctx.info["investor"] = df → scanner.investor_summary
 
 API: ``https://m.stock.naver.com/api/stock/{code}/trend?pageSize={n}[&bizdate=YYYYMMDD]``
   - 최신순 JSON 배열. pageSize 최대 60 (200 은 HTTP 400 확인). bizdate 를 주면 그 날짜 '이전' 자료.

@@ -10,29 +10,33 @@ from chart_screener.scanner import ScanResult, scan_one
 from synthetic import confirmed_market, make_context, make_ohlcv
 
 
+CWH = "cup_with_handle"
+
+
 def _pr(name, detected=True, score=80.0, stage=BREAKOUT):
     return PatternResult(name=name, label=name, detected=detected, score=score, stage=stage, pivot=100.0, stop=93.0)
 
 
 def test_composite_prefers_actionable_stage():
-    a = scoring.compute({"vcp": _pr("vcp", stage=BREAKOUT)}, rs=90)
-    b = scoring.compute({"vcp": _pr("vcp", stage=EXTENDED)}, rs=90)
+    a = scoring.compute({CWH: _pr(CWH, stage=BREAKOUT)}, rs=90)
+    b = scoring.compute({CWH: _pr(CWH, stage=EXTENDED)}, rs=90)
     assert a.composite > b.composite
-    assert a.best_pattern == "vcp" and a.best_stage == BREAKOUT
+    assert a.best_pattern == CWH and a.best_stage == BREAKOUT
 
 
 def test_composite_bonus_and_market_penalty():
-    res = {"vcp": _pr("vcp"), "cup_handle": _pr("cup_handle", score=70)}
-    base = scoring.compute(res, rs=90)
-    assert "복수 패턴 중첩" in " ".join(base.notes)
+    res = {CWH: _pr(CWH)}
+    base = scoring.compute(res, rs=90, recent_big_value=True)
+    assert "거래대금 300억+ +5" in " ".join(base.notes)
     ms = confirmed_market()
     ms.state = "correction"
-    worse = scoring.compute(res, rs=90, market_state=ms)
+    worse = scoring.compute(res, rs=90, market_state=ms, recent_big_value=True)
     assert worse.composite < base.composite
 
 
 def test_candidate_rule():
-    assert scoring.is_candidate({"vcp": _pr("vcp")})
+    assert scoring.is_candidate({CWH: _pr(CWH)})
+    assert not scoring.is_candidate({"vcp": _pr("vcp")})                    # 2026-10-14 제거된 옛 키
     assert not scoring.is_candidate({"trend_template": _pr("trend_template")})
 
 
@@ -73,64 +77,70 @@ def _stock(results, close=9800.0, avg_value=50e8, market_cap=1e12, rs=90.0, code
     s = StockScan(code=code, name=name, market="KOSPI", close=close, change_pct=0.01, market_cap=market_cap, rs=rs,
                   value_today=avg_value, avg_value_20=avg_value, max_value_5=avg_value, partial=False,
                   results=results, score=sb)
-    s.leader = sb.leader
     s.position = position_plan(s)
     return s
 
 
-def _base(stage=NEAR_PIVOT, pivot=10000.0, stop=9300.0, name="vcp", bo=None, metrics=None):
+def _base(stage=NEAR_PIVOT, pivot=10000.0, stop=9300.0, name=CWH, bo=None, metrics=None):
     return PatternResult(name=name, label=name, detected=True, score=80, stage=stage, pivot=pivot, stop=stop,
                          breakout_date=bo, metrics=metrics or {})
 
 
 def test_position_plan_risk_sizing():
-    p = _stock({"vcp": _base()}).position
+    p = _stock({CWH: _base()}).position
     assert p["entry"] == 10000 and p["stop"] == 9300
     assert p["risk_pct"] == pytest.approx(0.07)
     assert p["shares"] == math.floor(1e8 * 0.01 / 700) and p["cap"] == "위험"
     assert p["amount"] == p["shares"] * 10000 and p["max_loss"] == p["shares"] * 700
     assert p["plan"] == "피벗 10,000 돌파 매수"
     # 비중 한도 20% (손절폭이 좁을 때)
-    p = _stock({"vcp": _base(stop=9950)}).position
+    p = _stock({CWH: _base(stop=9950)}).position
     assert p["cap"] == "비중" and p["shares"] == 2000
     # 유동성 한도: 20일 평균 거래대금 2억 × 2% = 400만 → 400주
-    p = _stock({"vcp": _base()}, avg_value=2e8).position
+    p = _stock({CWH: _base()}, avg_value=2e8).position
     assert p["cap"] == "유동성" and p["shares"] == 400
 
 
 def test_position_plan_texts():
-    assert _stock({"vcp": _base(stop=8800)}).position["plan"] == "눌림 대기 (손절폭 12.0% > 10%)"
-    assert _stock({"vcp": _base(stop=8800)}).position["shares"] == 0
-    p = _stock({"vcp": _base(stage=BREAKOUT, bo="2026-10-06")}, close=10300).position
+    # 피벗 기준 손절폭(진입가 바닥)이 10% 를 넘으면 눌림으로 줄지 않는다 → '관망' (예전 '눌림 대기'는 풀릴 수 없는 문구)
+    assert _stock({CWH: _base(stop=8800)}).position["plan"] ==         "관망 — 손절폭 12.0% > 10% (피벗 진입 기준 10,000 · 눌림으로 줄지 않음)"
+    assert _stock({CWH: _base(stop=8800)}).position["shares"] == 0
+    # 피벗 위에서 손절폭만 큰 경우는 피벗 쪽으로 눌리면 풀린다 → '눌림 대기'
+    p = _stock({CWH: _base(stage=BREAKOUT, bo="2026-10-06")}, close=10500).position
+    assert p["plan"].startswith("눌림 대기 (손절폭 11.4% > 10%") and p["shares"] == 0
+    p = _stock({CWH: _base(stage=BREAKOUT, bo="2026-10-06")}, close=10300).position
     assert p["entry"] == 10300 and p["plan"].startswith("돌파 확인")
-    assert _stock({"vcp": _base(bo="2026-10-01")}, close=9900).position["plan"] == "피벗 10,000 재돌파 매수"
-    assert _stock({"vcp": _base(stage=FAILED, bo="2026-10-01")}, close=9500).position["plan"] == "돌파 실패 — 관망"
+    assert _stock({CWH: _base(bo="2026-10-01")}, close=9900).position["plan"] == "피벗 10,000 재돌파 매수"
+    assert _stock({CWH: _base(stage=FAILED, bo="2026-10-01")}, close=9500).position["plan"] == "돌파 실패 — 관망"
     # 돌파 후 손절가 아래로 밀렸으면 관망
-    assert _stock({"vcp": _base(bo="2026-10-01")}, close=9200).position["plan"] == "손절가 이탈 — 관망"
+    assert _stock({CWH: _base(bo="2026-10-01")}, close=9200).position["plan"] == "손절가 이탈 — 관망"
     # 돌파 전 형성 중: 지금 가격이 손절가 아래여도 피벗 역지정가 매수 계획은 유효
-    p = _stock({"vcp": _base(stage=FORMING)}, close=8000).position
+    p = _stock({CWH: _base(stage=FORMING)}, close=8000).position
     assert p["plan"] == "피벗 10,000 돌파 매수" and p["shares"] > 0
-    # 300억 장대양봉 눌림목: 50%선 ~ +3% 매수 구간 상단(백테스트 체결 기준) 지정가, 손절은 종가 기준
-    bvp = _base(name="big_value_pullback", pivot=10500, stop=9100, metrics={"support": 9650})
-    p = _stock({"big_value_pullback": bvp}, close=10100).position
-    assert p["entry"] == 9930                                   # 9,650 × 1.03 = 9,939.5 → 호가 10원 내림
-    assert p["plan"].startswith("50%선 9,650~9,930 눌림 구간 지정가 대기") and "종가 9,100 이탈" in p["plan"]
-    # 구간 안이면 현재가 매수
-    assert _stock({"big_value_pullback": bvp}, close=9800).position["plan"].startswith("50%선 눌림 구간 — 9,800 매수")
     # 표·리포트의 손절폭(entry_risk)과 점수의 손절폭도 같은 진입가 기준
-    s = _stock({"big_value_pullback": bvp}, close=10100)
-    assert s.entry_risk() == (9930, pytest.approx(p["risk_pct"], abs=1e-4))
-    assert s.score.entry_risk == pytest.approx(p["risk_pct"], abs=1e-4)
-    # 대표 패턴이 없으면(주도주 등) 계획 없음
+    s = _stock({CWH: _base(stage=BREAKOUT, bo="2026-10-06")}, close=10300)
+    assert s.entry_risk() == (10300, pytest.approx(s.position["risk_pct"], abs=1e-4))
+    assert s.score.entry_risk == pytest.approx(s.position["risk_pct"], abs=1e-4)
+    # 대표 패턴이 없으면 계획 없음
     assert _stock({}).position is None
 
 
+def test_no_stop_pattern_gets_no_plan():
+    # 컵 앤 핸들 식에는 손절 규칙이 없다 — 수량을 지어내지 않고 표에 이유를 적는다
+    s = _stock({CWH: _base(stop=None)})
+    assert s.position is None and s.entry_risk() == (10000, None)
+    scan = ScanResult(asof=pd.Timestamp("2026-10-07"), generated_at=pd.Timestamp("2026-10-07 16:00"),
+                      market={}, stocks=[s], scanned=1, elapsed=0.0, patterns=[CWH])
+    row = to_frame(scan).iloc[0]
+    assert row["진입계획"] == scanner.NO_STOP_PLAN and pd.isna(row["권장수량"]) and pd.isna(row["손절가"])
+
+
 def test_to_frame_nan_market_cap_and_new_columns():
-    s = _stock({"vcp": _base()}, market_cap=float("nan"))
+    s = _stock({CWH: _base()}, market_cap=float("nan"))
     s.groups = {"sector": "반도체", "themes": [["HBM", 0.9], ["AI", 0.8]], "best_rank_pct": 0.9}
     s.badge = "신규"
     scan = ScanResult(asof=pd.Timestamp("2026-10-07"), generated_at=pd.Timestamp("2026-10-07 16:00"),
-                      market={}, stocks=[s], scanned=1, elapsed=0.0, patterns=["vcp"])
+                      market={}, stocks=[s], scanned=1, elapsed=0.0, patterns=[CWH])
     df = to_frame(scan)
     row = df.iloc[0]
     assert pd.isna(row["시가총액(억)"])
@@ -221,29 +231,27 @@ def test_run_scan_without_sector_map():
     assert len(scan.radar) == 1 and scan.radar[0]["themes"] == []
 
 
-def test_enrich_investor_tolerates_missing_or_broken_canslim(monkeypatch):
+def test_enrich_investor_is_display_only(monkeypatch):
     from chart_screener.data import investor
-    from chart_screener.patterns import REGISTRY
     df = make_ohlcv([(0, 50), (300, 140), (330, 128), (360, 139)], seed=4)
-    monkeypatch.setattr(investor, "attach_investor", lambda ctx, offline=False: pd.DataFrame({"x": [1]}))
-    s1 = scan_one(make_context(df, rs=93), ["vcp", "trend_template"])     # canslim 없음
+    got = []
+    monkeypatch.setattr(investor, "attach_investor", lambda ctx, offline=False: got.append(ctx.code) or pd.DataFrame({"x": [1]}))
+    s1 = scan_one(make_context(df, rs=93))
     s2 = scan_one(make_context(df, rs=93, code="T2"))
-
-    def boom(ctx):
-        raise ValueError("boom")
-    monkeypatch.setitem(REGISTRY, "canslim", ("CAN SLIM", boom))
+    before = (s1.score.composite, s2.score.composite)
     scan = ScanResult(asof=df.index[-1], generated_at=pd.Timestamp("2026-10-07 16:00"), market={},
                       stocks=[s1, s2], scanned=2, elapsed=0.0, patterns=[])
     assert scanner.enrich_investor(scan, top=5, offline=True, verbose=False) == 2
-    assert "canslim" not in s1.results
-    assert any("재계산 실패" in w for w in s2.results["canslim"].warnings)
+    assert got == ["TEST", "T2"] and (s1.score.composite, s2.score.composite) == before   # 점수는 그대로
 
 
 # ---------------------------------------------------------------- CLI
 def test_cli_rejects_unknown_pattern_and_bad_risk(capsys):
     from chart_screener.__main__ import main
-    assert main(["scan", "--patterns", "vcp,nope"]) == 2
+    assert main(["scan", "--patterns", "cup_with_handle,nope"]) == 2
     assert "nope" in capsys.readouterr().err
+    assert main(["scan", "--patterns", "vcp"]) == 2                 # 2026-10-14 제거된 옛 패턴
+    assert "vcp" in capsys.readouterr().err
     assert main(["scan", "--risk", "50"]) == 2
     assert main(["scan", "--account", "0"]) == 2
 

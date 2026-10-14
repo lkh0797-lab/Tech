@@ -210,6 +210,53 @@ dl.mx dd { margin: 0; text-align: right; font-family: var(--font-data); overflow
 .breakdown { font-size: 12px; color: var(--muted); padding: 0 16px 10px; }
 footer { padding: 8px 16px 24px; color: var(--muted); font-size: 12px; }
 footer p { margin: 0 0 4px; }
+/* 《차트의 기술》 기법: 시장 맥락 칸 · 후보 배지 · 규칙 출처 · 체크리스트 · 청산 계획 */
+.mctx { display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 10px 16px 0; align-items: stretch; }
+.mctx .mc { flex: 1 1 320px; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 12px; font-size: 12.5px; }
+.mctx .mc b { font-weight: 600; }
+.mctx .mc .row { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; }
+.mctx .mc .row + .row { margin-top: 3px; }
+.mctx .mc .k { color: var(--muted); font-size: 11.5px; }
+.mctx .mnote { flex: 1 1 100%; color: var(--muted); font-size: 11.5px; margin: 0; }
+.flag { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 11px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.flag.on { border-color: var(--warn); color: var(--warn); }
+.flag.good { border-color: var(--good); color: var(--good); }
+.flag.bad { border-color: var(--down); color: var(--down); }
+.tag.kind { margin-left: 4px; border: 1px dashed var(--line); background: none; }
+.ckc { font-family: var(--font-data); font-size: 12px; white-space: nowrap; }
+.ckc .p { color: var(--good); } .ckc .w { color: var(--warn); } .ckc .u { color: var(--muted); }
+.d-tech { border-top: 1px solid var(--line); padding: 10px 16px 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; }
+.d-tech > * { min-width: 0; }   /* 긴 출처 · URL 이 폰 폭에서 칸을 넓혀 잘리지 않게 (그리드 항목 min-width: auto) */
+.d-tech:empty { display: none; }
+.d-tech h3 { margin: 0 0 6px; font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: .04em; }
+.d-tech .lbl { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 3px; border: 1px solid var(--warn); color: var(--warn); font-size: 11px; letter-spacing: 0; }
+.d-tech .src { color: var(--muted); font-size: 11.5px; margin: 4px 0 0; }
+.d-tech .tw { overflow-x: auto; }
+table.ckt { font-size: 12.5px; }
+table.ckt th { position: static; cursor: default; }
+table.ckt td { white-space: normal; text-align: left; vertical-align: top; }
+table.ckt td.n { text-align: right; white-space: nowrap; font-family: var(--font-data); color: var(--muted); }
+.st { display: inline-block; min-width: 34px; text-align: center; padding: 0 6px; border-radius: 999px; font-size: 11.5px; border: 1px solid var(--line); white-space: nowrap; }
+.st.pass { border-color: var(--good); color: var(--good); }
+.st.warn { border-color: var(--warn); color: var(--warn); }
+.st.unknown { color: var(--muted); border-style: dashed; }
+details.sub { border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); min-width: 0; }
+details.sub > summary { padding: 6px 10px; cursor: pointer; font-size: 12.5px; color: var(--muted); }
+details.sub[open] > summary { border-bottom: 1px solid var(--line); }
+details.sub > .in { padding: 8px 10px; font-size: 12.5px; min-width: 0; overflow-wrap: anywhere; }
+ul.org { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+ul.org li { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 2px 8px; }
+ul.org li .ok { font-family: var(--font-data); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.okind { display: inline-block; font-size: 10.5px; padding: 0 5px; border-radius: 3px; margin-right: 4px; border: 1px solid var(--line); color: var(--muted); }
+.okind.v { border-color: var(--accent); color: var(--accent); }
+.okind.u { border-color: var(--good); color: var(--good); }
+.okind.c { border-color: var(--warn); color: var(--warn); }
+.okind.m { border-style: dashed; }
+ul.ep { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12.5px; }
+.nest dl.mx { margin-top: 4px; }
+.nest h4 { margin: 8px 0 2px; font-size: 11.5px; color: var(--muted); font-weight: 500; font-family: var(--font-data); }
+.bk { color: var(--muted); font-size: 12px; margin: 0; }
+.bk li { margin-bottom: 3px; }
 @media (max-width: 600px) {
   header.top { position: static; }
   .stats { margin-left: 0; }
@@ -225,6 +272,7 @@ footer p { margin: 0 0 4px; }
     <div class="stats num" id="stats"></div>
   </div>
 </header>
+<section class="mctx" id="mctx" aria-label="시장 맥락 (지수)" hidden></section>
 
 <main>
   <div class="panel" id="listPanel">
@@ -249,7 +297,7 @@ footer p { margin: 0 0 4px; }
         <select id="market" aria-label="시장">
           <option value="">전체 시장</option><option>KOSPI</option><option>KOSDAQ</option>
         </select>
-        <label class="chk"><input type="checkbox" id="act"> 매수 검토 구간만</label>
+        <label class="chk" title="돌파 · 피벗 근접 중 매수 계획을 낼 수 있는 대표만 — 관찰 칩 · 손절 규칙 없는 신호 패턴(60일선 · 월봉 적삼병) · 안착 확인 대기 · 거래량 미달 · 피벗 없는 결과 · 계획 관망은 뺀다"><input type="checkbox" id="act"> 매수 검토 구간만</label>
       </div>
       <div class="acct" role="group" aria-label="포지션 계산">
         <label>계좌 <input id="acct" inputmode="numeric" autocomplete="off" aria-label="계좌 규모(원)"> 원</label>
@@ -272,7 +320,8 @@ footer p { margin: 0 0 4px; }
 
     <section id="v-radar" role="tabpanel" aria-labelledby="tab-radar" hidden>
       <p class="note"><b>관심 목록 (매수 신호 아님)</b> · 최근 10거래일 안에 거래대금 300억↑ · +7%↑ 장대양봉이 나온 종목입니다.
-        과거 검증에서 다음 날 시가 추격 매수는 평균 손실이었고, 상승 추세 종목이 몸통 50%선까지 처음 눌렸을 때만 성과가 나았습니다.
+        과거 검증(2026-10-14 제거된 '300억 눌림목' 탐지기의 백테스트)에서 다음 날 시가 추격 매수는 평균 손실이었고, 상승 추세 종목이 몸통 50%선까지 처음 눌렸을 때만 성과가 나았습니다.
+        지금은 이 목록을 매수 신호로 바꾸는 패턴이 없습니다.
         후보 목록에 있는 종목은 행을 누르면 차트가 열립니다.</p>
       <div class="tbl-wrap">
         <table id="radarTbl"><thead><tr></tr></thead><tbody></tbody></table>
@@ -298,7 +347,8 @@ footer p { margin: 0 0 4px; }
       </div>
       <div class="vcards" id="vCards" aria-label="차트 셋업 (누르면 표를 거름)"></div>
       <p class="note">기업추적 저평가 화면의 등급(가치는 지켰는데 주가가 빠진 회사) · 차트 셋업은 Tech 패턴 · <b>관찰용 — 점수 · 매수 계획에 안 들어감</b> ·
-        과거 검증: 기업추적 차트 셋업 검증에서 저평가 범위 안 바닥 투매 흡수 6개월 +3.4%p · 컵 12개월 +6~10%p(앞 기간 약함, 표본 수백 건)</p>
+        과거 검증은 기업추적 기술.py 의 자체 셋업(이 리포트 칩과 다른 식)으로 잰 것: 저평가 범위 안 바닥 투매 흡수 6개월 +3.4%p · 컵 12개월 +6~10%p(앞 기간 약함, 표본 수백 건).
+        지금 칩의 컵 앤 핸들(사용자 식)은 저평가와 함께 잰 적 없음</p>
       <div class="tbl-wrap">
         <table id="valTbl"><thead><tr></tr></thead><tbody></tbody></table>
         <div class="empty" id="noVal" hidden>조건에 맞는 종목이 없습니다. 범위·카드 선택을 풀어 보세요.</div>
@@ -347,12 +397,16 @@ footer p { margin: 0 0 4px; }
           </div>
         </section>
       </div>
+      <div class="d-tech" id="dTech"></div>
     </div>
   </div>
 </main>
 <footer id="foot">
   <p id="valNote">가격은 수정주가, 거래량은 원 거래량(네이버 금융). 과거 거래대금은 (고+저+종)/3×거래량 추정치이며 당일 값은 실제 집계치입니다.</p>
   <p id="sizeRule">권장수량 = 계좌 × 1회 위험 ÷ (진입가 − 손절가), 단 1종목 투입금액은 계좌의 20% 이하. 계좌 값은 이 브라우저에만 저장됩니다.</p>
+  <p id="techNote">《차트의 기술》 영상 기법(빗각 추세선 돌파 · 피보나치 눌림 반등 · 빗각 돌파 + 피보 눌림 · 60일선 수급 돌파 · 월봉 적삼병 · 10% 주도주)은
+    우리 데이터로 검증하기 전입니다. 영상 속 사례 수익률은 일화라 싣지 않고, 불코우스키 수치는 미국 주식 표본이라 '참고 — 불코우스키 미국 통계(우리 데이터 아님)' 줄에만 둡니다 —
+    둘 다 우리 확률이 아닙니다. 우리 성적은 체크리스트 4번(이 종목 재현)과 기록 채점으로 잽니다. 체크리스트 10은 '검증 전' 표시이며 종합 점수에 들어가지 않습니다.</p>
   <p>이 리포트는 기술적 패턴 탐지 결과이며 투자 권유가 아닙니다.</p>
 </footer>
 
@@ -376,12 +430,26 @@ const STAGE = { breakout: "돌파", near_pivot: "피벗 근접", forming: "형�
 const BADGE = { "신규": "b-new", "단계상승": "b-up", "돌파": "b-bo", "실패": "b-fail" };
 const BADGE_ORDER = { "돌파": 4, "단계상승": 3, "신규": 2, "실패": 1 };
 const LABEL = DATA.labels || {};
-const lbl = (n) => LABEL[n] || (n === "leader" ? "주도주" : n) || "";
+const lbl = (n) => LABEL[n] || n || "";
 const BASES = DATA.base_patterns || [];
 const STOCKS = DATA.stocks || [];
 const VSTOCKS = DATA.value_stocks || [];   // 저평가 탭: 후보가 아닌 '저평가' 등급 종목의 짧은 차트 (약 1년)
 const byCode = Object.fromEntries(VSTOCKS.concat(STOCKS).map((s) => [s.code, s]));
 const INFO = new Set(DATA.info_patterns || []);
+const SIGNALS = new Set(DATA.signal_patterns || []);   // 손절 규칙 없는 사건 신호 (60일선 · 월봉 적삼병) — 점수 · 매수 계획 밖
+const OBS = new Set(DATA.observe_patterns || ["vocal"]); // 관찰 칩 (entryStop 이 먼저 쓴다 — 아래 OBSERVE 와 같은 집합)
+const EODP = new Set(DATA.eod_patterns || []);          // 완성 봉만 판정하는 기법 — 장중이면 단계 · 피벗 대비 · 계획 = 어제 종가
+// 장중 저가로 이미 확정된 결과(metrics.intraday_final)는 단계가 오늘 봉으로 정해졌으니 지금가
+const eodBasis = (s, n) => s.partial && EODP.has(n) && isNum(s.eod_close) &&
+  !(s.patterns && s.patterns[n] && s.patterns[n].metrics && s.patterns[n].metrics.intraday_final);
+const basisClose = (s, n) => (eodBasis(s, n) ? s.eod_close : s.close);
+// 단계 이름: 기법이 metrics.stage_label 을 주면 그것 (피벗 없는 결과 — 10% 주도주 관찰일 · 피보 신호 전 접촉은 '피벗 근접'이 아님)
+const stLbl = (p) => (p && p.metrics && p.metrics.stage_label) || STAGE[p && p.stage] || "-";
+const KIND = DATA.pattern_kind || {};
+const KIND_LBL = { signal: "신호", observe: "관찰", info: "정보" };
+const ORIGINS = DATA.origins || {};                     // 규칙 출처 표 공유 ({"$ref": id})
+const deref = (o) => (o && typeof o === "object" && o.$ref ? ORIGINS[o.$ref] || {} : o);
+const NOSTOP = DATA.no_stop_reason || {};
 const narrow = () => window.matchMedia("(max-width: 1080px)").matches;
 const smooth = () => (window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
 
@@ -415,8 +483,22 @@ function entryStop(s) {
   }
   // 보컬은 관찰용(과거 검증 손실) — 대표로 보여도 매수 수량을 내지 않는다
   if (s.best === "vocal") return { entry: null, stop: null, plan: "보컬 — 관찰용 칩 (과거 검증 346거래 승률 31% · 거래당 평균 −2.4%, 매수 계획을 내지 않음)", src: "pattern", hold: "관망" };
+  // 다른 관찰 칩(10% 주도주) · 신호 패턴(60일선 · 월봉 적삼병) — 손절 규칙이 없어 수량을 내지 않는다 (scanner.plan_text 문구)
+  if (OBS.has(s.best)) return { entry: null, stop: null, plan: s.plan || `${lbl(s.best)} — 관찰용 칩 (매수 계획을 내지 않음)`, src: "pattern", hold: "관망" };
   const lp = s.best && s.patterns[s.best];
-  if (lp && lp.pivot > 0 && lp.stop > 0) return { entry: Math.max(lp.pivot, s.close), stop: lp.stop, plan: p && p.plan, src: "pattern", hold: null };
+  if (SIGNALS.has(s.best)) {
+    const inv = lp && lp.metrics && isNum(lp.metrics.invalid_below) ? ` · 구조 무효 = 확정 저점 ${won(lp.metrics.invalid_below)}` : "";
+    return { entry: null, stop: null, plan: (s.plan || `${lbl(s.best)} — ${NOSTOP[s.best] || "손절 규칙이 없어"} 매수 계획(수량) 없음`) +
+      (lp && lp.pivot > 0 ? ` (기준가 ${won(lp.pivot)}${inv})` : ""), src: "pattern", hold: "계획 없음" };
+  }
+  if (lp && lp.pivot > 0 && lp.stop > 0) return { entry: Math.max(lp.pivot, basisClose(s, s.best)), stop: lp.stop, plan: p && p.plan, src: "pattern", hold: null };
+  // 손절가 없는 결과(컵 앤 핸들 식 · 빗각 돌파 임박) — 피벗은 보이되 수량을 지어내지 않는다
+  if (lp && lp.pivot > 0 && !(lp.stop > 0)) {
+    const floor = lp.metrics && isNum(lp.metrics.cup_low) ? ` · 구조 무효 = 컵 바닥 ${won(lp.metrics.cup_low)}` : "";
+    return { entry: null, stop: null, plan: `${lbl(s.best)} — ${NOSTOP[s.best] || "식에 손절 규칙이 없어"} 매수 수량을 내지 않음 (피벗 ${won(lp.pivot)}${floor})`, src: "pattern", hold: "계획 없음" };
+  }
+  // 피벗 없는 베이스 결과(피보 신호 전 접촉 · 대기)
+  if (lp && lp.detected && !(lp.pivot > 0)) return { entry: null, stop: null, plan: s.plan || `${lbl(s.best)} — ${NOSTOP[s.best] || "진입가가 아직 없어"} 매수 계획(수량) 없음`, src: "pattern", hold: "계획 없음" };
   return p && p.plan ? { entry: null, stop: null, plan: p.plan, src: "scan", hold: null } : null;
 }
 function sizing(s) {
@@ -510,6 +592,45 @@ function brdChip(key, b) {
   if (!Object.keys(M).some((k) => B[k]) && B.ALL) html += brdChip("ALL", B.ALL);
   $("#mkts").innerHTML = html;
 })();
+
+/* ---------- 시장 맥락 칸 (지수 120일선 · 고점 대비 낙폭 · 되돌림 · 월봉 적삼병) — 표시만, 확률 아님 ---------- */
+const ZONE_CLS = { "50~61.8% 구간": "on", "61.8% 넘음": "bad" };
+function legTxt(L, what) {
+  if (!L) return `<span class="muted">${what}: 확정 저점 없음(ZigZag 20%)</span>`;
+  return `<span class="k">${what}</span> <span class="num">${esc(L.low_date || "")} ${won(L.low)} → ${esc(L.high_date || "")} ${won(L.high)}</span>` +
+    ` · 고점 대비 <span class="num ${updn(L.dd)}">${pct(L.dd)}</span> · 되돌림 <span class="num">${isNum(L.retr) ? (L.retr * 100).toFixed(1) + "%" : "-"}</span>` +
+    (L.zone ? ` <span class="flag ${ZONE_CLS[L.zone] || ""}">${esc(L.zone)}</span>` : "");
+}
+function red3Txt(r) {
+  if (!r) return '<span class="muted">월봉 적삼병: 모름</span>';
+  const st = r.state === "signal" ? `신호 ${esc(r.signal_month || "")}` : esc(r.state_label || r.state || "-");
+  const mn = r.month_now && isNum(r.month_now.chg) ? ` · 이번 달 진행 ${pct(r.month_now.chg)}(미완성)` : "";
+  return `<span class="k">지수 월봉 적삼병</span> <span class="flag ${r.state === "signal" ? "good" : r.detected ? "on" : ""}">${st}</span>${mn}`;
+}
+(function marketCtx() {
+  const MC = DATA.market_ctx;
+  if (!MC || !Object.keys(MC).length) return;
+  const el = $("#mctx");
+  let html = Object.entries(MC).map(([k, m]) => {
+    if (m.error) return `<div class="mc"><b>${esc(k)}</b> <span class="muted">맥락 계산 실패: ${esc(m.error)}</span></div>`;
+    // tq.market_context: 'close' · 'intraday' = 기준별 파동 {low, high, price, retr, dd, zone, prev_leg} (확정 저점 없으면 null)
+    const c = m.close && typeof m.close === "object" ? m.close : null, d = m.intraday || {};
+    const tip = [`${k} 기준일 ${m.date}${m.partial_dropped ? " (장중 미완성 봉 뺌)" : ""}`,
+      `장중 기준(고저 ZigZag · 오늘 저가): ` + (d.low ? `${d.low_date} ${won(d.low)} → ${d.high_date} ${won(d.high)} · 되돌림 ${isNum(d.retr) ? (d.retr * 100).toFixed(1) + "%" : "-"}` : "확정 저점 없음") +
+        (d.prev_leg ? ` · 직전 큰 파동 ${isNum(d.prev_leg.retr) ? (d.prev_leg.retr * 100).toFixed(1) + "%" : "-"}` : ""),
+      ...Object.values(m.origin || {})].join("\n");
+    const ma = isNum(m.ma120) ? `<span class="flag ${m.above_ma120 ? "good" : "bad"}">경기선(120일) ${m.above_ma120 ? "위" : "아래"}</span> <span class="num muted">${won(m.ma120)}</span>` : '<span class="muted">120일선 이력 부족</span>';
+    const px = c ? c.price : isNum(m.close) ? m.close : null;
+    return `<div class="mc" title="${esc(tip)}"><div class="row"><b>${esc(m.name || k)}</b><span class="num">${won(px)}</span>${ma}<span class="muted num">${esc(m.date || "")}</span></div>` +
+      `<div class="row">${legTxt(c, "마지막 파동")}</div>` +
+      (c && c.prev_leg ? `<div class="row">${legTxt(c.prev_leg, "직전 큰 파동")}</div>` : "") +
+      `<div class="row">${red3Txt(m.red3_monthly)}</div></div>`;
+  }).join("");
+  html += `<p class="mnote">종가 기준 · 저점 = ZigZag 20% 확정 저점(그 뒤 20% 올라야 확정), 되돌림 = (고점 − 오늘) ÷ (고점 − 저점). 50~61.8% 깃발은 다우 이론 이차 조정 ⅓~⅔(ChartSchool) · ` +
+    `영상 [39:00–41:00]에 따르면 김종봉은 50%를 강조(공개 자료로 확인 못함). 확률 · 반등 기대치가 아니다. 마우스를 올리면 장중 기준과 출처.</p>`;
+  el.innerHTML = html;
+  el.hidden = false;
+})();
 /* 고정 헤더 높이 → 상세 패널 sticky 위치·표 높이 */
 const setHdr = () => document.documentElement.style.setProperty("--hdr", $("#top").offsetHeight + "px");
 setHdr();
@@ -547,6 +668,13 @@ const ksChips = (tags) => (tags || []).map((t) => `<span class="tag ks${KS_BAD.h
 const nameCell = (name, code, extra = "") => `<td class="l"><span class="nm">${esc(name)}</span>${name !== code ? `<span class="cd">${esc(code)}</span>` : ""}${extra}</td>`;
 const gChip = (b) => !b ? '<span class="muted">-</span>' :
   `<span class="gchip" title="${esc(b[1])} · ${esc(b[0])} ${topPct(b[2])}"><span class="k">${esc(b[1])}</span><span class="n">${esc(b[0])}</span>${isNum(b[2]) ? `<b>${topPct(b[2])}</b>` : ""}</span>`;
+/* 저평가 등급 · 공시위험 배지 (기업추적 CHART_SCREENER_VALUE_JSON · CHART_SCREENER_RISK_JSON — 체크리스트 9 와 같은 자료) */
+const vbadges = (s) => { const b = s.badges; if (!b) return "";
+  return (b.tier ? `<span class="pill ${b.tier === "저평가" ? "tier-v" : "tier-o"}" title="${esc(["기업추적 저평가 등급", ...(b.tier_why || [])].join(" · "))}">${esc(b.tier)}</span>` : "") +
+    (b.risk || []).map(([t, sev]) => `<span class="tag ks${sev === "bad" ? " bad" : ""}" title="공시 위험 (기업추적 공시목록)">${esc(t)}</span>`).join(""); };
+const ckCell = (s) => { const c = s.panel && s.panel.counts; if (!c) return '<span class="muted">-</span>';
+  return `<span class="ckc" title="체크리스트 10 (검증 전 · 점수에 안 들어감): 통과 ${c.pass} · 경고 ${c.warn} · 모름 ${c.unknown}"><span class="p">${c.pass}</span>·<span class="w">${c.warn}</span>·<span class="u">${c.unknown}</span></span>`; };
+const kindTag = (n) => KIND_LBL[KIND[n]] ? `<span class="tag kind" title="${KIND[n] === "signal" ? "손절 규칙 없는 신호 — 종합 점수 · 매수 계획 밖" : "관찰용 — 종합 점수 · 매수 계획 밖"}">${KIND_LBL[KIND[n]]}</span>` : "";
 const badgeHtml = (s) => !s.badge ? "" :
   `<span class="pill ${BADGE[s.badge] || ""}" title="${s.prev_stage ? "직전 단계: " + esc(STAGE[s.prev_stage] || s.prev_stage) : "직전 스캔에 없던 종목"}">${esc(s.badge)}</span>`;
 
@@ -556,19 +684,21 @@ const hasGroups = STOCKS.some((s) => s.groups);
 const hasInv = STOCKS.some((s) => s.inv);
 const hasTp = STOCKS.some((s) => s.kis && isNum(s.kis.tp_gap));
 const hasEps = STOCKS.some((s) => s.kis && isNum(s.kis.fwd_eps_g));
+const hasPanel = STOCKS.some((s) => s.panel && s.panel.counts);
 const invSum = (s) => (s.inv && isNum(s.inv.inst) && isNum(s.inv.foreign) ? s.inv.inst + s.inv.foreign : null);   // 기관 + 외국인 (원)
 const OBSERVE = new Set(DATA.observe_patterns || ["vocal"]);
 const zq = (s) => Z.get(s.code);
 const rk = (s) => { const z = zq(s); return z && isNum(z.risk) ? z.risk : s.risk; };  // 진입가(계획) 기준 손절폭
 const COLS = [
   { k: "rank", t: "#", asc: 1, v: (s) => s.rank, h: (s) => `<td class="num muted">${s.rank}</td>` },
-  { k: "name", t: "종목", l: 1, asc: 1, v: (s) => s.name, h: (s) => nameCell(s.name, s.code, (s.leader ? '<span class="tag lead" title="2단계 주도주 (베이스 없이 강세)">주도주</span>' : "") + ksChips(s.kst)) },
+  { k: "name", t: "종목", l: 1, asc: 1, v: (s) => s.name, h: (s) => nameCell(s.name, s.code, ksChips(s.kst) + vbadges(s)) },
   { k: "badge", t: "변화", l: 1, when: () => hasBadge, v: (s) => BADGE_ORDER[s.badge] || 0, h: (s) => `<td class="l">${badgeHtml(s)}</td>` },
   { k: "close", t: "종가", v: (s) => s.close, h: (s) => `<td class="num">${won(s.close)}</td>` },
   { k: "chg", t: "등락", v: (s) => s.chg, h: (s) => `<td class="num ${updn(s.chg)}">${pct(s.chg, 2)}</td>` },
   { k: "score", t: "종합", v: (s) => s.score, h: (s) => `<td><span class="score num ${s.score >= 70 ? "hi" : ""}">${s.score.toFixed(1)}</span></td>` },
   { k: "rs", t: "RS", v: (s) => s.rs ?? -1, h: (s) => `<td class="num">${s.rs ?? "-"}</td>` },
-  { k: "best", t: "대표 패턴", l: 1, v: (s) => s.best || "", h: (s) => `<td class="l">${s.best ? esc(lbl(s.best)) + ` <span class="pill ${s.stage}">${STAGE[s.stage] || "-"}</span>` : s.leader ? '<span class="muted">주도주 (베이스 없음)</span>' : '<span class="muted">-</span>'}</td>` },
+  { k: "best", t: "대표 패턴", l: 1, v: (s) => s.best || "", h: (s) => `<td class="l">${s.best ? esc(lbl(s.best)) + kindTag(s.best) + ` <span class="pill ${s.stage}">${esc(s.stage_label || STAGE[s.stage] || "-")}</span>` + eodMark(s) : '<span class="muted">-</span>'}</td>` },
+  { k: "ck", t: "체크 10 (검증 전)", when: () => hasPanel, v: (s) => (s.panel && s.panel.counts ? s.panel.counts.pass - s.panel.counts.warn / 10 : -99), h: (s) => `<td class="num">${ckCell(s)}</td>` },
   { k: "dist", t: "피벗 대비", v: (s) => s.dist ?? -9, h: (s) => `<td class="num">${pct(s.dist)}</td>` },
   { k: "risk", t: "손절폭", asc: 1, v: (s) => rk(s) ?? 9, h: (s) => { const r = rk(s);
       return `<td class="num">${r == null ? "-" : r <= 0 ? '<span class="muted">이탈</span>' : (r * 100).toFixed(1) + "%"}</td>`; } },
@@ -590,30 +720,58 @@ const COLS = [
   { k: "tags", t: "탐지 패턴", l: 1, v: (s) => s.detected.length, h: (s) => `<td class="l"><span class="tags">${s.detected.filter((n) => n !== s.best).map((n) => `<span class="tag">${esc(tagLbl(s, n))}</span>`).join("")}</span></td>` },
 ];
 /* 저평가 종목 칩은 등급을 붙여 보인다 (기업추적 등급: 저평가 · 관찰) */
+const STAGE_SHORT = { breakout: "돌파", near_pivot: "근접", forming: "형성", extended: "이격", failed: "실패" };
 function tagLbl(s, n) {
-  if (!INFO.has(n)) return lbl(n);
+  if (!INFO.has(n)) {   // 대표가 아닌 탐지 패턴은 단계도 (예: '월봉 적삼병 · 형성' — 신호 전 꼬리표와 신호를 가른다)
+    const pp = s.patterns && s.patterns[n], st = pp && pp.stage;
+    const sh = (pp && pp.metrics && pp.metrics.stage_short) || (st && STAGE_SHORT[st]);
+    return lbl(n) + (sh ? ` · ${sh}` : "");
+  }
   const p = s.patterns && s.patterns[n];
   return p && p.metrics && p.metrics.tier === "관찰" ? "저평가 관찰" : "저평가";
+}
+/* '매수 검토 구간만' — 돌파 · 피벗 근접 중 매수 계획을 낼 수 있는 대표만: 관찰 칩 · 손절 규칙 없는 신호 패턴(60일선 · 월봉 적삼병) ·
+   기법상 아직 사지 않는 상태(빗각 안착 확인 대기 · 거래량 미달) · 피벗 없는 결과(피보 신호 전) · 계획 '관망'은 뺀다 */
+function buyReview(s) {
+  if (!s.best || OBSERVE.has(s.best) || SIGNALS.has(s.best) || s.plan_hold) return false;
+  const z = Z.get(s.code);
+  if (z && z.hold === "관망") return false;     // 계획이 '관망'(돌파 실패 · 손절가 이탈 · 눌림으로 안 풀리는 손절폭)
+  const p = s.patterns && s.patterns[s.best];
+  return (s.stage === "breakout" || s.stage === "near_pivot") && !!(p && p.pivot > 0);
+}
+function eodMark(s) {      // 장중 스캔인데 완성 봉만 판정하는 기법 — 단계 · 피벗 대비 · 계획이 어제 종가 기준임을 표시
+  return s.eod_basis ? ` <span class="muted" title="장중 스캔 — 이 기법은 완성 봉만 판정: 단계 · 피벗 대비 · 계획 = ${esc(s.eod_basis)} 종가 기준 (오늘 미완성 봉 안 씀)">(${esc(String(s.eod_basis).slice(5))} 종가)</span>` : "";
 }
 function filtered() {
   return STOCKS.filter((s) =>
     (!state.q || s.name.toLowerCase().includes(state.q) || s.code.toLowerCase().includes(state.q)) &&
     (!state.stage || s.stage === state.stage) &&
     (!state.market || s.market === state.market) &&
-    (!state.act || (!OBSERVE.has(s.best) && (s.stage === "breakout" || s.stage === "near_pivot"))) &&
+    (!state.act || buyReview(s)) &&
     [...state.pats].every((p) => s.detected.includes(p)));
 }
 const cand = grid($("#candTbl"), COLS, filtered, { key: "score", dir: -1 },
   (s) => `class="go" data-c="${esc(s.code)}" aria-selected="${state.sel === s.code}"`);
 const _candRender = cand.render;
+if (!STOCKS.length)   // 필터 탓이 아니라 오늘 걸린 종목이 없을 때
+  $("#noRows").textContent = `후보 없음 — 오늘 ${BASES.concat([...SIGNALS], [...OBSERVE]).map(lbl).join(" · ") || "등록된 패턴"}에 걸린 종목이 없습니다.`;
 cand.render = () => { const n = _candRender(); $("#noRows").hidden = n > 0; $("#nCand").textContent = n === STOCKS.length ? n : `${n}/${STOCKS.length}`; return n; };
 $("#tbody").addEventListener("click", (e) => { const tr = e.target.closest("tr"); if (tr) select(tr.dataset.c, true); });
 
 /* 필터 */
-const counts = {};
-STOCKS.forEach((s) => s.detected.forEach((n) => (counts[n] = (counts[n] || 0) + 1)));
-$("#chips").innerHTML = BASES.concat(DATA.chip_patterns || ["canslim", "pocket_pivot", "vocal"]).filter((n) => counts[n]).map((n) =>
-  `<button class="chip" data-p="${esc(n)}" aria-pressed="false">${esc(lbl(n))}<span class="c">${counts[n]}</span></button>`).join("");
+const counts = {}, mains = {};
+// 칩 숫자 = 그 패턴이 후보를 만드는 결과(베이스 = 피벗 있음, 신호 = 신호 단계 DATA.signal_stages) 수, '+N' = 신호 전 꼬리표
+// (피보 신호 전 접촉 · 적삼병 형성 · 60일선 실패 등 — 다른 이유로 후보가 된 종목). 칩을 누르면 둘 다 보인다.
+const SIG_ST = DATA.signal_stages || {};
+const isMain = (s, n) => { const p = s.patterns && s.patterns[n]; if (!p || !p.detected) return true;
+  if (SIGNALS.has(n)) return (SIG_ST[n] || []).includes(p.stage);
+  return BASES.includes(n) ? p.pivot > 0 : true; };
+STOCKS.forEach((s) => s.detected.forEach((n) => { counts[n] = (counts[n] || 0) + 1; if (isMain(s, n)) mains[n] = (mains[n] || 0) + 1; }));
+$("#chips").innerHTML = BASES.concat(DATA.chip_patterns || ["vocal"]).filter((n) => counts[n]).map((n) => {
+  const m = mains[n] || 0, tag = counts[n] - m;
+  const tip = tag ? `후보를 만드는 결과 ${m} · 신호 전 꼬리표 ${tag}(다른 이유로 후보가 된 종목) — 누르면 둘 다 보임` : `${counts[n]}종목`;
+  return `<button class="chip" data-p="${esc(n)}" aria-pressed="false" title="${esc(tip)}">${esc(lbl(n))}<span class="c">${m}</span>` +
+    (tag ? `<span class="c">+${tag}</span>` : "") + "</button>"; }).join("");
 $("#chips").addEventListener("click", (e) => {
   const b = e.target.closest(".chip"); if (!b) return;
   const p = b.dataset.p, on = !state.pats.has(p);
@@ -731,7 +889,7 @@ if (VALUE) {
   const tierPill = (r) => `<span class="pill ${r.tier === "저평가" ? "tier-v" : "tier-o"}" title="${esc((r.why || []).join(" · ") || "기업추적 등급")}">${esc(r.tier || "-")}</span>`;
   const patTags = (r) => r.skip ? `<span title="${esc(r.skip)}">패턴 미판정(유동성 · 기간 부족)</span>` :
     r.thin && !(r.pats || []).length ? `<span class="muted" title="${esc(r.thin)}">패턴 없음 · 거래대금 적음</span>` :
-    `<span class="tags">${(r.pats || []).map(([n, st]) => `<span class="tag">${esc(lbl(n))}${st ? `<span class="st"> · ${esc(STAGE_S[st] || st)}</span>` : ""}</span>`).join("") || '<span class="muted">-</span>'}</span>`;
+    `<span class="tags">${(r.pats || []).map(([n, st, sh]) => `<span class="tag">${esc(lbl(n))}${st ? `<span class="st"> · ${esc(sh || STAGE_S[st] || st)}</span>` : ""}</span>`).join("") || '<span class="muted">-</span>'}</span>`;
   const VCOLS = [
     { k: "name", t: "종목", l: 1, asc: 1, v: (r) => r.name, h: (r) => nameCell(r.name, r.code, tierPill(r) +
         (r.in_list || r.cand ? `<span class="tag in" title="${r.in_list ? "후보 목록에 있음" : "후보 — 리포트 상위 목록 밖이라 차트 없음"}">후보</span>` : "") + ksChips(r.kst) +
@@ -820,8 +978,9 @@ function select(code, reveal = false) {
   $("#dMeta").textContent = `시가총액 ${eok(s.market_cap)} · 당일 거래대금 ${eok(s.value_today)}${s.partial ? "(장중)" : ""} · 20일 평균 ${eok(s.avg_value_20)} · RS ${s.rs ?? "-"}`;
   const g = s.groups, tags = [];
   if (s.badge) tags.push(badgeHtml(s) + (s.prev_stage ? `<span class="muted" style="font-size:12px">직전 ${esc(STAGE[s.prev_stage] || s.prev_stage)}</span>` : ""));
-  if (s.leader) tags.push('<span class="tag lead">주도주</span>');
   if (s.kst && s.kst.length) tags.push(ksChips(s.kst));
+  const vb = vbadges(s);
+  if (vb) tags.push(vb);
   if (g && g.sector) tags.push(gChip([g.sector, "업종", g.sector_rank_pct]));
   if (g) (g.themes || []).slice(0, 4).forEach(([n, r]) => tags.push(gChip([n, "테마", r])));
   if (g && g.themes_other && g.themes_other.length)
@@ -846,8 +1005,12 @@ function select(code, reveal = false) {
   loadHist(code);
 }
 function breakText(s) {
-  if (!s.vonly) return `종합 ${s.score.toFixed(1)} = 패턴 ${s.bd.pattern_part} × 0.5 + 기술체력 ${s.bd.tech_part} × 0.3 + RS ${s.bd.rs_part} × 0.2` +
-    (s.bd.notes.length ? ` · ${s.bd.notes.join(", ")}` : "");
+  if (!s.vonly) {
+    const b = s.bd, f = (x) => (isNum(x) ? +x.toFixed(2) : "?");
+    return `종합 ${s.score.toFixed(1)} = 단계 가중치 ${f(b.w)} × (패턴 ${b.pattern_part} × ${f(b.w_pattern)} + RS ${b.rs_part} × ${f(b.w_rs)})` +
+      (isNum(b.bonus) && b.bonus ? ` ${b.bonus > 0 ? "+" : "−"} 가감 ${Math.abs(b.bonus)}` : "") +
+      ((n) => (n.length ? ` · ${n.join(", ")}` : ""))(b.notes.filter((x) => !/^단계 가중치 ×[\d.]+$/.test(x)));   // 이유 없는 W 는 식에 이미 있음
+  }
   const span = HIST.get(s.code) === "ok" ? `${dstr(s.ohlcv.t[0])}부터 긴 이력` : `최근 약 ${s.ohlcv.t.length}봉`;
   return `저평가 목록 종목 — 후보 아님 (관찰용 · 매수 계획 없음). 차트는 ${span}, 탭은 탐지된 패턴만.`;
 }
@@ -909,22 +1072,122 @@ const NO_PAT = { detected: false, score: 0, stage: null, pivot: null, stop: null
   reasons: [], warnings: ["탐지된 패턴 없음"], metrics: {}, annotations: [] };
 function showPattern(name) {
   const s = byCode[state.sel], p = (name && s.patterns[name]) || NO_PAT;   // 패턴이 하나도 없는 종목도 차트는 그린다
-  const limit = name === "big_value_pullback" && !p.breakout_date;   // 재돌파 전: 50%선 지정가 매수
-  const entry = p.pivot ? (limit ? Math.min(p.pivot, s.close) : Math.max(p.pivot, s.close)) : null;
+  const entry = p.pivot ? Math.max(p.pivot, basisClose(s, name)) : null;
   const risk = entry && p.stop ? 1 - p.stop / entry : null;
+  const noStop = p.detected && p.pivot > 0 && !(p.stop > 0);    // 손절가 없는 결과 (컵 앤 핸들 식 · 신호 패턴 · 빗각 돌파 임박)
+  const noStopTxt = name === "cup_with_handle" ? "식에 없음" : SIGNALS.has(name) || OBS.has(name) ? "기법에 없음" : "아직 없음";
   $("#dTrade").innerHTML =
-    `<div><span>${limit ? "50%선 (지정가 매수)" : "피벗(매수 기준)"}</span><b>${won(p.pivot)}</b></div>` +
-    `<div><span>손절가</span><b>${won(p.stop)}</b></div>` +
-    `<div><span>단계 · 손절폭</span><b>${STAGE[p.stage] || "-"} · ${risk == null ? "-" : risk < 0 ? "이탈" : (risk * 100).toFixed(1) + "%"}</b></div>`;
+    `<div><span>피벗(매수 기준)</span><b>${won(p.pivot)}</b></div>` +
+    `<div><span>손절가</span><b>${noStop ? noStopTxt : won(p.stop)}</b></div>` +
+    `<div><span>단계 · 손절폭</span><b>${esc(stLbl(p))} · ${risk == null ? "-" : risk < 0 ? "이탈" : (risk * 100).toFixed(1) + "%"}</b></div>` +
+    (eodBasis(s, name) ? `<div style="grid-column: span 2"><span>판정 봉</span><b>어제 완성 봉 종가 ${won(s.eod_close)} 기준 (장중 미완성 봉은 이 기법 판정에 안 씀)</b></div>` : "");
   $("#dChecks").innerHTML = p.reasons.map((r) => `<li class="ok">${esc(r)}</li>`).join("") +
     p.warnings.map((r) => `<li class="no">${esc(r)}</li>`).join("") || '<li class="no">근거 없음</li>';
-  const ml = MLABEL[name] || {};
-  $("#dMetrics").innerHTML = Object.entries(p.metrics).map(([k, v]) => {
+  const ml = mlab(name);
+  // 패턴 수치: 단순 값만 (출처 표 · 체크리스트 · 청산 계획 · 불코우스키 · 중첩 값은 아래 기법 칸 #dTech 에 따로)
+  $("#dMetrics").innerHTML = Object.entries(p.metrics || {}).filter(([k, v]) => !TECH_KEYS.has(k) && plainVal(v)).map(([k, v]) => {
     const m = ml[k];
     return m ? `<dt title="${esc(k)}">${esc(m[0])}</dt><dd>${esc(fmtKind(v, m[1], k))}</dd>`
       : `<dt class="raw">${esc(k)}</dt><dd>${esc(fmtMetric(v))}</dd>`;
   }).join("") || '<dt>-</dt><dd>수치 없음</dd>';
+  renderTech(s, name, p);
   drawChart(s, p);
+}
+
+/* ---------- 기법 칸: 규칙 · 출처 / 체크리스트 10(검증 전) / 청산 계획 / 불코우스키 참고 / 세부 수치 ---------- */
+const TECH_KEYS = new Set(["origin", "checklist", "checklist_counts", "exit_plan", "bulkowski", "bulkowski_note", "reference", "params"]);
+const plainVal = (v) => v == null || typeof v !== "object" || (Array.isArray(v) && v.every((x) => x == null || typeof x !== "object"));
+const mlab = (name) => Object.assign({}, (DATA.mlabels || {})[name] || {}, MLABEL[name] || {});
+const URL_RE = /(https?:\/\/[^\s)<>"'\]]+)/g;
+function linkify(text) {   // 글은 esc, http(s) 주소만 링크
+  return String(text ?? "").split(URL_RE).map((part, i) => (i % 2
+    ? `<a href="${esc(part)}" target="_blank" rel="noopener noreferrer">${esc(part.replace(/^https?:\/\//, "").slice(0, 60))}${part.length > 68 ? "…" : ""}</a>`
+    : esc(part))).join("");
+}
+function originKinds(t) {
+  const s = String(t || ""), out = [];
+  if (/영상 \[/.test(s)) out.push(["v", "영상 시각"]);
+  if (/https?:\/\//.test(s)) out.push(["u", "출처"]);
+  if (/구현 선택/.test(s)) out.push(["c", "구현 선택"]);
+  if (!out.length) out.push(["m", "규칙"]);
+  return out;
+}
+const kindChips = (t) => originKinds(t).map(([c, l]) => `<span class="okind ${c}">${l}</span>`).join("");
+function originsHtml(org, title) {
+  const o = deref(org);
+  const ent = o && typeof o === "object" ? Object.entries(o).filter(([, v]) => typeof v === "string" && v) : [];
+  if (!ent.length) return "";
+  const cnt = { v: 0, u: 0, c: 0 };
+  ent.forEach(([, v]) => originKinds(v).forEach(([c]) => { if (c in cnt) cnt[c] += 1; }));
+  return `<details class="sub"><summary>${esc(title)} ${ent.length}개 — 영상 시각 ${cnt.v} · 출처 ${cnt.u} · 구현 선택 ${cnt.c}</summary>` +
+    `<div class="in"><ul class="org">${ent.map(([k, v]) => `<li><span class="ok">${esc(k)}</span><span>${kindChips(v)}${linkify(v)}</span></li>`).join("")}</ul>` +
+    `<p class="src">판정 근거 줄 끝의 [키] 가 이 표의 키입니다. '구현 선택'은 출처가 없어 정한 값(이유를 같이 적음)이고 나중에 바꿀 수 있습니다.</p></div></details>`;
+}
+function checklistHtml(items, counts, srcTxt) {
+  if (!Array.isArray(items) || !items.length) return "";
+  const c = counts || { pass: 0, warn: 0, unknown: 0 };
+  if (!counts) items.forEach((it) => { if (it.status in c) c[it.status] += 1; });
+  const rows = items.map((it) => `<tr><td class="n">${esc(it.no)}</td><td>${esc(it.name)}</td>` +
+    `<td><span class="st ${esc(it.status)}">${esc(it.status_label || it.status)}</span></td>` +
+    `<td>${esc(it.note || "")}</td><td class="muted" style="font-size:11.5px">${linkify(it.origin || "")}</td></tr>`).join("");
+  return `<section><h3>체크리스트 10<span class="lbl">검증 전 · 점수에 안 들어감</span></h3>` +
+    `<p class="src">통과 ${c.pass} · 경고 ${c.warn} · 모름 ${c.unknown} — ${esc(srcTxt)}. Bulkowski 체크리스트 항목을 우리 자료로 옮긴 판정이며 우리 데이터로 효과를 잰 적이 없습니다(4번만 이 종목 재현 결과 — 확률 아님).</p>` +
+    `<div class="tw"><table class="ckt"><thead><tr><th>#</th><th class="l">항목</th><th class="l">판정</th><th class="l">값 · 메모</th><th class="l">출처</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+}
+const yn = (v) => (v == null ? "-" : v ? "예" : "아니오");
+function exitHtml(ep, srcTxt) {
+  if (!ep || typeof ep !== "object") return "";
+  const li = [`5일선 ${won(ep.ma5)} · 10일선 ${won(ep.ma10)} · 50일선 ${won(ep.ma50)} <span class="muted">(${esc(ep.date || "")} 완성 봉)</span>`,
+    `오늘 5일선 종가 이탈(1차): ${yn(ep.ma5_break_today)} · 10일선 무장(아래 첫 종가): ${yn(ep.ma10_arm_today)} · 10일선 위반: ${yn(ep.ma10_violation_today)} · 50일선 위반: ${yn(ep.ma50_violation_today)}`];
+  if (ep.ma10_pending) li.push(`진행 중 무장 ${esc(ep.ma10_pending.date || "")} — 기준 저가 ${won(ep.ma10_pending.low)}`);
+  if (ep.entry_date) {
+    li.push(`가정 진입(신호 봉) ${esc(ep.entry_date)} · 보유 ${ep.held ?? "-"}봉 · 7주 규칙 기준 ${esc(ep.active_rule || "-")} (${esc(ep.seven_week_mode || "")})`);
+    if (ep.first_ma5_exit) li.push(`진입 뒤 첫 5일선 종가 이탈 ${esc(ep.first_ma5_exit.date || "")}`);
+    if (ep.rule_exit) li.push(`규칙상 첫 청산 ${esc(ep.rule_exit.date || "")} — ${esc(ep.rule_exit.rule || "")} 위반 · 재현 체결가 ${won(ep.rule_exit.fill)} (구현 선택)`);
+  }
+  (ep.notes || []).forEach((n) => li.push(esc(n)));
+  return `<section><h3>청산 계획<span class="lbl">표시만</span></h3><ul class="ep">${li.map((x) => `<li>${x}</li>`).join("")}</ul>` +
+    `<p class="src">${esc(srcTxt)} · 1차 5일선 종가 이탈 · 2차 모랄레스 10일선 위반(무장일 다음 날 저가가 무장일 저가 아래) · 7주(35거래일) 규칙 · 주문 · 알림 없음.</p>` +
+    originsHtml(ep.origin, "청산 규칙 출처") + `</section>`;
+}
+function bulkowskiHtml(p, ep) {
+  const m = p.metrics || {}, lines = [];
+  const add = (x) => { if (Array.isArray(x)) x.forEach(add); else if (typeof x === "string" && x) lines.push(x); };
+  add(m.bulkowski); add(m.bulkowski_note); add(m.reference); if (ep) add(ep.bulkowski);
+  const uniq = [...new Set(lines)];
+  if (!uniq.length) return "";
+  return `<details class="sub"><summary>참고 — 불코우스키 미국 통계(우리 데이터 아님) ${uniq.length}줄</summary><div class="in">` +
+    `<ul class="bk">${uniq.map((x) => `<li>${linkify(x)}</li>`).join("")}</ul>` +
+    `<p class="src">미국 주식 표본(주로 강세장)의 수치입니다. 우리 데이터가 아니고 이 종목의 확률이 아닙니다 — 영상 속 사례 수익률도 같은 이유로 싣지 않습니다.</p></div></details>`;
+}
+function nestVal(v, depth = 0) {
+  if (v == null || typeof v !== "object") return esc(fmtMetric(v));
+  if (Array.isArray(v)) {
+    if (plainVal(v)) return esc(fmtMetric(v));
+    return `<ul class="ep">${v.slice(0, 12).map((x) => `<li>${depth > 1 ? esc(JSON.stringify(x).slice(0, 200)) : nestVal(x, depth + 1)}</li>`).join("")}${v.length > 12 ? `<li class="muted">… ${v.length - 12}개 더</li>` : ""}</ul>`;
+  }
+  const o = deref(v);
+  if (depth > 1) return esc(JSON.stringify(o).slice(0, 240));
+  return Object.entries(o).filter(([k]) => k !== "origin").map(([k, x]) => `<span class="muted">${esc(k)}</span> ${nestVal(x, depth + 1)}`).join(" · ");
+}
+function nestedHtml(name, p) {
+  const ml = mlab(name);
+  const ent = Object.entries(p.metrics || {}).filter(([k, v]) => !TECH_KEYS.has(k) && !plainVal(v));
+  if (!ent.length) return "";
+  return `<details class="sub"><summary>세부 수치 ${ent.length}개 (파동 · 선 · 점수 항목 · 재현 등)</summary><div class="in nest">` +
+    ent.map(([k, v]) => `<h4 title="${esc(k)}">${esc((ml[k] && ml[k][0]) || k)}</h4><div>${nestVal(v)}</div>`).join("") + `</div></details>`;
+}
+function renderTech(s, name, p) {
+  const el = $("#dTech"), P = s.panel || null, m = p.metrics || {};
+  const own = Array.isArray(m.checklist) && m.checklist.length;
+  const ck = own ? checklistHtml(m.checklist, null, `${lbl(name)} 기준(이 기법의 진입가 · 손절 · 재현)`)
+    : P && P.checklist ? checklistHtml(P.checklist, P.counts, `대표 패턴 ${P.pattern ? lbl(P.pattern) : "없음"} 기준 ` +
+        (P.source === "scan" ? "(스캔이 잼 — 진입 = max(피벗, 종가) · 그 결과 손절가)" : "(그 기법의 진입가 · 손절 · 재현)")) : "";
+  const ep = m.exit_plan && typeof m.exit_plan === "object" ? m.exit_plan : P && P.exit_plan;
+  const epSrc = m.exit_plan ? `${lbl(name)} 기준` : P ? `대표 패턴 ${P.pattern ? lbl(P.pattern) : "없음"} 기준` : "";
+  const rules = originsHtml(m.origin, `${lbl(name)} 규칙 · 출처`);
+  el.innerHTML = (rules ? `<section><h3>규칙 · 출처 (영상 시각 · 출처 URL · 구현 선택)</h3>${rules}</section>` : "") +
+    ck + exitHtml(ep, epSrc) + bulkowskiHtml(p, ep) + nestedHtml(name, p);
 }
 function fmtMetric(v) {
   if (v == null) return "-";
@@ -936,39 +1199,37 @@ function fmtMetric(v) {
 
 /* 패턴 수치 한글 표기: [라벨, 형식] — pct 비율→%, spct 부호 있는 %, x 배수, eok 억, won 가격, d 일수, yn 예/아니오, enum */
 const ENUM = {
-  position: { bottom: "바닥권", mid: "중간", high: "2년 고점권" },
-  post_state: { failed: "실패 (지지선 이탈)", pullback: "눌림 (매수 구간)", retest: "박스 상단 재시험", extended: "이격 과다", breakout: "돌파 직후",
-    holding: "돌파 유지", pre_breakout: "돌파 전 (감시)", waiting: "눌림 대기", bounced: "눌림 후 반등", rebreak: "재돌파",
-    rebreak_hold: "재돌파 후 지지", rebreak_extended: "재돌파 후 이격" },
+  state: { READY: "구조 완성 · 피벗 대기", BREAKOUT_CONFIRMED: "돌파 확인", EXTENDED: "돌파 · 이격 과다",
+    PRICE_BREAKOUT: "가격만 돌파 (거래량 미확인)", VOLUME_CONFIRMED_CLOSE_FAILED: "장중 돌파 · 종가 미달",
+    INVALIDATED: "컵 바닥 이탈", REJECTED: "필수 규칙 탈락" },
+  breakout_volume_status: { pass: "통과 (1.4배 이상)", fail: "미달", unknown: "모름 (직전 50봉 부족)" },
 };
 const MLABEL = {
-  long_base_breakout: {
-    base_days: ["박스 기간", "d"], box_height: ["박스 높이", "pct"], box_top: ["박스 상단", "won"], box_bottom: ["박스 하단", "won"],
-    breakout_date: ["돌파일", "t"], breakout_change: ["돌파일 등락률", "spct"], days_since_breakout: ["돌파 후 경과", "d"],
-    vol_mult_50d: ["거래량 (50일 평균 대비)", "x"], vol_mult_base: ["거래량 (박스 평균 대비)", "x"], value_eok: ["거래대금", "eok"],
-    position: ["2년 범위 위치", "enum"], range_pos: ["2년 범위 내 위치", "pct"], dd_from_2y_high: ["2년 고점 대비", "spct"],
-    post_state: ["돌파 후 상태", "enum"], pullback: ["눌림 중", "yn"], limit_up: ["상한가 돌파", "yn"],
-    body: ["양봉 몸통", "pct"], body_ratio: ["몸통 비율 (고저폭 대비)", "pct"], close_pos: ["종가 위치 (고저폭 내)", "pct"],
-    candle_mid: ["장대양봉 50%선", "won"], hold_above_mid: ["50%선 지지", "yn"], hold_above_top: ["박스 상단 지지", "yn"],
-    close_above_top: ["돌파일 종가 vs 박스 상단", "spct"], post_peak_gain: ["돌파 후 최고 상승", "spct"], dist_from_pivot: ["현재가 vs 박스 상단", "spct"],
-    buy_limit: ["매수 한도가", "won"], support: ["지지선", "won"], hold_zone: ["지지 구간 상단", "won"], risk_pct: ["현재가 기준 손절폭", "pct"],
-    recent_vol_vs_breakout: ["최근 거래량 / 돌파일", "x"], base_drift: ["박스 기울기", "spct"], ma120_drift: ["120일선 변화", "spct"],
-    atr_compression: ["ATR 수축 (최근/이전)", "x"], bb_compression: ["볼린저 폭 수축", "x"], legs: ["돌파 레그 수", "n"], last_leg_date: ["마지막 레그일", "t"],
-    top_confirmed: ["상단 확인 (2회 이상 터치)", "yn"], bottom_confirmed: ["하단 확인", "yn"], pre_breakout: ["돌파 전 감시", "yn"],
-    dist_to_pivot: ["박스 상단까지", "spct"], vol_expand_5d: ["5일 거래량 확대", "x"], ud_vol_ratio: ["상승/하락일 거래량 비", "x"], watch_fail: ["감시 탈락 사유", "t"],
-  },
-  big_value_pullback: {
-    candle_date: ["장대양봉일", "t"], candle_change: ["장대양봉 등락률", "spct"], value_eok: ["장대양봉 거래대금", "eok"],
-    support: ["몸통 50%선 (지지)", "won"], days_since_candle: ["장대양봉 후 경과", "d"], stage2_ok: ["상승 추세 (2단계) 충족", "yn"],
-    pullback_low_vs_support: ["눌림 저점 vs 50%선", "spct"], limit_up: ["상한가", "yn"], post_state: ["눌림 상태", "enum"],
-    candle_open: ["장대양봉 시가", "won"], candle_close: ["장대양봉 종가", "won"], candle_high: ["장대양봉 고가", "won"], candle_low: ["장대양봉 저가", "won"],
-    close_pos: ["종가 위치 (고저폭 내)", "pct"], vol_mult_50d: ["거래량 (50일 평균 대비)", "x"], tt_passed: ["트렌드 템플릿 충족 (8개 중)", "n"],
-    ma_stack: ["20>60>120일선 정배열", "yn"], from_52w_high: ["52주 고점 대비", "spct"], rs_at_candle: ["장대양봉일 RS", "n"],
-    buy_zone_top: ["매수 구간 상단 (지정가 한도)", "won"], fail_line: ["실패선 (50%선 −3%·저가)", "won"], pullback_date: ["50%선 근접일", "t"],
-    pullback_vol_ratio: ["눌림 거래량 / 장대양봉", "x"], held_above_support: ["50%선 위 마감 유지", "yn"],
-    rebreak_level: ["재돌파 기준 (눌림 전 고점)", "won"], rebreak_date: ["재돌파일", "t"], dist_from_support: ["현재가 vs 50%선", "spct"],
-    risk_pct: ["손절폭 (피벗·현재가 중 높은 값 기준)", "pct"], legs: ["연속 장대양봉 수", "n"], last_leg_date: ["마지막 장대양봉일", "t"],
-    too_big: ["+15%↑ 과열 (관찰만)", "yn"],
+  cup_with_handle: {
+    state: ["식 상태", "enum"], rule_version: ["식 버전", "t"], profile: ["프로파일", "t"], pattern_id: ["구조 ID", "t"],
+    pivot_price: ["피벗 (우측 림 고점)", "won"], entry_price: ["진입가 (피벗 위 첫 호가)", "won"],
+    distance_to_entry: ["진입가까지 (마지막 완성 봉 종가 기준)", "spct"],
+    cup_high: ["컵 고점", "won"], cup_low: ["컵 바닥 (구조 무효 기준)", "won"], cup_midpoint: ["컵 중간값", "won"],
+    cup_depth: ["컵 깊이", "pct"], handle_high: ["손잡이 고점", "won"], handle_low: ["손잡이 저점", "won"],
+    handle_depth: ["손잡이 깊이", "pct"], handle_sessions: ["손잡이 봉 수", "n"], cup_sessions: ["컵 봉 수", "n"],
+    base_calendar_days: ["베이스 기간 (달력일)", "d"], base_weeks: ["베이스 기간 (주)", "f1"], base_sessions: ["베이스 봉 수", "n"],
+    left_peak_date: ["좌측 림", "t"], bottom_date: ["컵 바닥일", "t"], right_peak_date: ["우측 림", "t"],
+    handle_start_date: ["손잡이 시작", "t"], prior_start_date: ["선행 상승 시작", "t"], prior_advance: ["선행 상승", "pct"],
+    recovery_ratio: ["우측 회복률", "f2"], rim_gap: ["우측 림 − 좌측 림", "spct"], roundness_score: ["U자 정도", "f2"],
+    prominent_double_bottom: ["뚜렷한 W (쌍바닥)", "yn"], bottom_occupancy: ["바닥 구간 머문 비율", "pct"],
+    handle_volume_ratio: ["손잡이 거래량 / 직전 50봉", "x"], handle_volatility_ratio: ["손잡이 변동성 / 직전 50봉", "x"],
+    handle_above50_fraction: ["손잡이 50일선 위 비율", "pct"], upward_wedge_risk: ["손잡이 위로 쐐기", "yn"],
+    right_up_down_volume_sum_ratio: ["우측 상승일/하락일 거래량 합", "x"], zero_volume_fraction50: ["최근 50봉 거래량 0 비율", "pct"],
+    median_turnover50: ["최근 50봉 거래대금 중앙값", "won"], rs_high_ratio: ["RS 선 / 252봉 고점", "f2"],
+    market_up_filter: ["지수 50일선 필터", "yn"], quality_score: ["품질 점수 (성공 확률 아님)", "f1"],
+    score_coverage: ["점수 관측 비중", "pct"], event_date: ["사건일", "t"], structure_as_of: ["구조 기준일", "t"],
+    breakout_rvol: ["돌파일 거래량 / 직전 50봉 평균", "x"], breakout_volume_status: ["돌파 거래량", "enum"],
+    extension: ["돌파일 종가 vs 진입가", "spct"], close_location: ["돌파일 종가 위치 (고저폭 내)", "pct"],
+    entry_policy: ["진입가 규칙", "t"], bars_since_event: ["사건 뒤 경과 (봉)", "n"], benchmark: ["RS · 시장 지수", "t"],
+    volume_unverified: ["거래량 확인 보류 (RVOL 구간에 거래정지)", "yn"],
+    attempt_consumed: ["확인 안 된 돌파 시도로 구조 끝남 (다음 봉부터 식 판정 없음)", "yn"],
+    provisional: ["장중 잠정", "yn"], rejection_reasons: ["탈락 규칙", "list"], n_ready: ["READY 구조 수", "n"],
+    n_events: ["최근 사건 수", "n"], n_rejected: ["탈락 구조 수", "n"],
   },
   vocal: {
     step: ["깔때기 단계", "t"], stage: ["단계 번호 (④~⑦)", "n"], rank: ["오늘 거래대금 순위", "n"], pool_days: ["150위 안 일수 (30일)", "d"],
@@ -979,24 +1240,64 @@ const MLABEL = {
     pullback_low: ["눌림 저점 (손절)", "won"], high_date: ["고점일", "t"], base_date: ["바닥일", "t"], peak_vol_date: ["급등 최대봉일", "t"],
     lead: ["테마 대장 이력", "list"], themes: ["소속 테마", "list"], asof: ["기준일", "t"], junk: ["잡주 사유", "list"],
   },
-  absorb: {
-    absorb_date: ["투매 흡수일", "t"], days_since: ["흡수 후 경과", "d"], vol_mult: ["거래량 (앞 60봉 평균 대비)", "x"],
-    tail_low: ["꼬리 저가 (손절)", "won"], low_52w: ["52주 저점", "won"], close_pos: ["종가 위치 (고저폭 내)", "pct"],
-    gap_pct: ["현재가 vs 꼬리 저가", "sp"], observe_only: ["관찰 전용", "yn"],
-  },
   undervalued: {
     tier: ["기업추적 등급", "t"], score: ["저평가 점수", "f1"], per_then: ["1년 전 PER", "f1"], per: ["지금 PER", "f1"],
     per_pct: ["PER 자기 역사 백분위 (0 = 가장 쌈)", "p"], dd: ["52주 고점 대비", "sp"], px_yoy: ["주가 1년", "sp"], roe: ["ROE", "p"],
     debt_eq: ["부채비율", "p"], ni_yoy: ["순이익 1년", "sp"], industry: ["업종", "t"], risk: ["공시 위험", "t"], tier_why: ["관찰 사유", "list"],
     observe_only: ["관찰 전용", "yn"],
   },
-  stage2: {
-    cross_date: ["150일선 돌파일", "t"], days_since_cross: ["돌파 후 경과", "d"], ma150: ["150일선 (손절)", "won"],
-    ma150_pct: ["현재가 vs 150일선", "sp"], ma150_slope_20: ["150일선 20봉 기울기", "sp"], base_below_pct: ["바닥 기간 150일선 아래 비율", "p"],
-    base_range_pct: ["바닥 고저폭", "p"], vol_mult: ["돌파 뒤 최대 거래량 배수", "x"], prior_high: ["석 달 종가 고점", "won"],
-    observe_only: ["관찰 전용", "yn"],
+  // 《차트의 기술》 기법 (60일선 수급 돌파는 모듈의 METRIC_LABELS — DATA.mlabels)
+  trendline_break: {
+    rule_version: ["규칙 id (일지 rule)", "t"], rule_id: ["규칙 id", "t"], core_version: ["공용 부품 판", "t"], asof: ["판정 봉", "t"],
+    phase: ["기계 상태", "t"], tl_stage: ["기법 단계", "t"], line_today: ["오늘 선 값", "won"], line_next: ["다음 봉 선 값 (종가가 그 이하면 실패)", "won"],
+    close_vs_line: ["종가 vs 오늘 선", "spct"], close_vs_pivot: ["종가 vs 돌파가", "spct"], score_coverage: ["점수 관측 비중", "pct"],
+    slope_ref_n: ["기울기 비교 선 수", "n"], stage_origin: ["단계 대응 출처 키", "t"], score_frozen_at: ["점수 동결일 (돌파일)", "t"],
+    fail_bars_ago: ["실패 뒤 경과 (봉)", "n"], line_changed: ["다음 봉 선이 새 선으로 바뀜", "yn"], next_line: ["다음 하향선", "t"],
+    slope_ref: ["기울기 비교 기준 (같은 종목 다른 선 |기울기| 중앙값, 로그 %/봉)", "pct"], hammer: ["돌파 전 바닥 망치형", "t"],
+  },
+  fib_pullback: {
+    rule_version: ["규칙 id (일지 rule)", "t"], core_version: ["공용 부품 판", "t"], phase: ["상태", "t"], phase_label: ["단계 설명", "t"],
+    provisional: ["장중 잠정", "yn"], state: ["기계 상태", "t"], trigger_date: ["장대양봉일", "t"], trigger_chg: ["장대양봉 전일 대비", "spct"],
+    trigger_body_x: ["장대양봉 몸통 / 직전 15봉 평균 몸통", "x"], trigger_vol_x: ["장대양봉 거래량 / 직전 20봉 평균", "x"], absorbed: ["흡수한 장대양봉", "list"],
+    wave_low: ["파동 저점 L", "won"], wave_low_date: ["L 날짜", "t"], l_mode: ["L 정하는 방식", "t"], l_swing_high_date: ["L 기준 직전 확정 고점", "t"],
+    wave_high: ["파동 고점 H", "won"], wave_high_date: ["H 날짜", "t"], confirm_date: ["고점 확정일", "t"], confirm_mode: ["고점 확정 방식", "t"],
+    resets: ["고점 갱신 횟수", "n"], fib_236: ["23.6% 라인", "won"], fib_382: ["38.2% 라인", "won"], fib_500: ["50% 라인", "won"], fib_618: ["61.8% 무효선", "won"],
+    retracement: ["지금 되돌림", "pct"], touch_mode: ["접촉 판정", "t"], active_level: ["접촉 라인", "pct"], touch_date: ["접촉일", "t"], touches: ["접촉 기록", "list"],
+    approach_level: ["접근 중 라인", "pct"], entry: ["진입가 (신호 종가)", "won"], stop_level: ["손절 라인", "pct"], stop_pct: ["손절폭", "pct"],
+    stop_alt: ["진입 −7% (함께 표시)", "won"], score_coverage: ["점수 관측 비중", "pct"], signal_date: ["신호일", "t"], bars_since_signal: ["신호 뒤 경과 (봉)", "n"],
+    signal_volume: ["신호 봉 거래량", "n"], signal_vol_ma5: ["신호 봉 5일 거래량 이평 (오늘 포함)", "n"], signal_vol_x: ["반등 거래량 배수 (점수 항목)", "x"],
+    vol_test: ["거래량 판정 (cross = 상향돌파)", "t"], stop_hit_date: ["손절 닿은 날", "t"], stop_fill: ["손절 체결 (재현 · 구현 선택)", "won"],
+    extended_date: ["이격 시작일", "t"], invalid_after_signal_date: ["신호 뒤 무효 조건일 (표시만)", "t"], replay_n: ["이 종목 재현 건수", "n"],
+    expires_in: ["셋업 만료까지 (봉)", "n"], replay: ["이 종목 과거 신호 (재현)", "list"], history: ["지난 셋업 기록", "list"],
+  },
+  red_three_monthly: {
+    rule_version: ["규칙 id (일지 rule)", "t"], core_version: ["공용 부품 판", "t"], state: ["판정 상태", "t"], state_label: ["상태", "t"],
+    months: ["완성 월봉 수", "n"], last_month: ["가장 최근 완성 월", "t"], asof: ["판정 봉", "t"], low_month: ["확정 저점 월", "t"], low: ["확정 저점", "won"],
+    low_left: ["왼쪽 달 저가", "won"], low_right: ["오른쪽 달 저가", "won"], score_unknown: ["모르는 꼬리표 (0점)", "list"],
+    invalid_below: ["구조 무효선 (확정 저점 — 손절 아님)", "won"], lag: ["저점 뒤 셋째까지 (개월)", "n"], candidates: ["저점 후보 월", "list"],
+    stop_rule: ["손절 규칙", "t"], signal_month: ["신호 월 (셋째 양봉)", "t"], signal_date: ["셋째 양봉 월 마지막 거래일", "t"],
+    known_date: ["확정 봉 (다음 달 첫 거래일)", "t"], third_open: ["셋째 양봉 시가", "won"], stage_note: ["단계 설명", "t"],
+    third_by_index: ["셋째 양봉 기한 (월봉 번호 · 내부)", "n"], halts: ["구간 안 거래정지일", "list"],
+  },
+  day_leader: {
+    rule_version: ["규칙 id (일지 rule)", "t"], signal_date: ["신호일", "t"], observe_on: ["관찰일", "t"], basis: ["10% 기준 (open = 시가 대비)", "t"],
+    up_open: ["시가 대비", "spct"], up_prev: ["전일 대비", "spct"], chg: ["판정 등락", "spct"], min_chg: ["등락 문턱", "pct"],
+    vr: ["거래량 / 직전 20봉 평균 (당일 제외)", "x"], volume: ["거래량", "n"], vol_base: ["거래량 기준선", "n"], vol_n: ["기준선 봉 수", "n"],
+    vol_mult: ["거래량 문턱", "x"], open: ["시가", "won"], high: ["고가 (피보 0%)", "won"], low: ["저가 (피보 100%)", "won"], close: ["종가", "won"],
+    order_pos: ["(시가 − 저가) ÷ 고저폭", "pct"], order_ambiguous: ["저가 → 고가 순서 불명", "yn"], close_pos: ["종가 위치 (고저폭 안)", "pct"],
+    basis_agree: ["시가 · 전일 대비 모두 10%↑", "yn"], fib_236: ["피보 23.6% (다음 날 참고가)", "won"], fib_382: ["피보 38.2% (다음 날 참고가)", "won"],
+    fib_500: ["피보 50% (다음 날 참고가)", "won"], fib_618: ["피보 61.8% (표시만)", "won"], entry_note: ["진입 안내 (판정 안 함)", "t"],
+    limit_regime: ["가격제한폭 체제", "t"], halts: ["기준선 구간 거래정지일", "list"], volume_unverified: ["거래량 확인 보류", "yn"],
+    provisional: ["장중 잠정", "yn"], stage_rule: ["단계 규칙", "t"], replay_n: ["이 종목 재현 건수", "n"],
+    intraday: ["장중 판정 (관찰일)", "t"], value: ["신호일 거래대금 (원)", "won"],
   },
 };
+// 빗각 돌파 + 피보 눌림 = 피보 눌림 수치 + 추세선 쪽
+MLABEL.trendline_fib = Object.assign({}, MLABEL.fib_pullback, {
+  rule_id: ["규칙 id", "t"], asof: ["판정 봉", "t"], tl_conf: ["빗각 안착 확인", "yn"], break_date: ["빗각 돌파일", "t"],
+  l_last_touch_date: ["L 구간 시작 (마지막 접점)", "t"], pre_signals: ["안착 확인 전 반등 (기록만)", "list"],
+  line_score: ["추세선 품질 (돌파일 동결)", "f1"], line_score_coverage: ["추세선 점수 관측 비중", "pct"], stage_origin: ["단계 대응 출처 키", "t"],
+});
 function fmtKind(v, kind, key) {
   if (v == null) return "-";
   if (kind === "yn") return v ? "예" : "아니오";

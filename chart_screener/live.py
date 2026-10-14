@@ -1,4 +1,5 @@
-"""실시간 감시 — 스캔 후보 × 증권사(한국투자증권)·네이버 시세 → 돌파·눌림·손절 알림 + 대시보드.
+"""실시간 감시 — 스캔 후보 × 증권사(한국투자증권)·네이버 시세 → 피벗 근접·돌파 알림 + 대시보드
+(눌림 · 손절 알림 장치는 남아 있지만 지금 패턴은 그 값을 채우지 않는다 — 아래 1 · 3).
 
     python -m chart_screener live                  # 자동: KIS 설정·토큰이 되면 KIS 실시간, 아니면 네이버
     python -m chart_screener live --source naver   # 네이버 시세 (10초 간격 조회)
@@ -8,9 +9,14 @@
 
 흐름
   1. 감시 목록: 스캔(장 마감 후 받은 캐시가 있으면 오프라인)을 돌려 최대 --top(40)종목을 고른다.
-     우선순위: 단계 돌파·피벗 근접·300억 눌림목 매수 구간 → 장기횡보 돌파 전 관찰·눌림 대기 →
-     진입 계획이 '피벗 X 돌파 매수'(역지정가)인 형성 중 종목. 돌파 실패·손절가 이탈(관망)은 제외.
-     종목마다 피벗·손절가·눌림 매수 구간(50%선 ~ 구간 상단)·50일 평균 거래량(오늘 제외)·대표 패턴·종합점수.
+     우선순위: 단계 돌파·피벗 근접 → 진입 계획이 '피벗 X 돌파 매수'(역지정가)인 형성 중 종목.
+     돌파 실패·손절가 이탈(관망)은 제외. 감시하는 베이스는 컵 앤 핸들(손절 규칙 없는 식, scoring.LIVE_PATTERNS)뿐이라
+     손절가 칸은 비고(《차트의 기술》 새 기법 — 빗각 · 피보 · 60일선 · 적삼병 · 10% 주도주 — 은 검증 전이라 감시하지 않는다)
+     형성 중 종목은 진입 계획이 없어 감시하지 않는다. 컵 앤 핸들의 확인 안 된 돌파 시도(가격만 돌파 · 종가 미달 —
+     metrics.attempt_consumed)도 뺀다: 식은 그 다음 봉부터 그 구조를 판정하지 않는다.
+     종목마다 피벗·손절가·50일 평균 거래량(오늘 제외)·대표 패턴·종합점수.
+     눌림 매수 구간(지정가 하한 support ~ 상단 zone_top) 칸과 '눌림 구간' 알림은 남겨 두었지만 2026-10-14 패턴 초기화로
+     채우는 패턴이 없다(예전 300억 장대양봉 눌림목 · 장기횡보 돌파 전 관찰 — 제거).
   2. 시세: kis = 실시간 체결가 웹소켓(H0STCNT0, 통합은 H0UNCNT0; 연속 실패하면 REST 현재가 조회로 대체하고
                  5분마다 웹소켓 재시도),
            naver = 네이버 실시간 조회 API (계속 실패하면 전 종목 목록 API 를 1분 간격으로, 3분마다 원래 방식 재시도).
@@ -20,10 +26,10 @@
        피벗 돌파   현재가 > 피벗. 전일 종가가 피벗 이하였거나 장중에 피벗 아래로 내려갔다 다시 넘을 때만
                    (이미 피벗 위에 있던 종목은 되밀렸다 재돌파할 때). 하루 예상 거래량 = 누적 ÷ 장중 경과 비율
                    (data.ohlcv.session_fraction, U자형) 을 50일 평균과 비교 → '거래량 1.8배 예상 ✓'.
-       눌림 구간   300억 장대양봉 눌림목: 50%선 ≤ 현재가 ≤ 매수 구간 상단
+       눌림 구간   support ≤ 현재가 ≤ zone_top (지금은 채우는 패턴 없음 — 위 1 참고)
        손절가 이탈 현재가 ≤ 손절가 (전일 종가가 이미 손절가 아래였던 종목은 장중에 위로 올라왔다 다시 내려갈 때만).
                    손절가를 깬 종목(전일 종가가 손절가 이하 포함)은 그날 근접·돌파·눌림 알림을 더 내지 않는다.
-     장중 신호는 '잠정'이다. 돌파는 종가가 피벗 위인지, 눌림목 손절은 종가 기준으로 확인할 것.
+     장중 신호는 '잠정'이다. 돌파는 종가가 피벗 위인지 확인할 것 (컵 앤 핸들 식의 돌파 확인 = 종가 ≥ 진입가 · 거래량 1.4배).
      오늘 정규장 체결이 아닌 시세(지난 거래일 시세·09:00 전·누적 거래량 0)는 표시만 하고 알림에 쓰지 않는다.
   4. 대시보드 output/live.html (몇 초마다 자동 새로고침, 원자적 쓰기) · 콘솔 · 윈도우 알림(토스트).
   5. 09:00 전에는 기다리고, 15:30 장 마감 뒤 종료 (--after-hours 면 계속). Ctrl+C 로 언제든 종료.
@@ -50,15 +56,14 @@ from typing import AsyncIterator, Callable, Iterable
 
 import pandas as pd
 
-from . import scoring
 from .broker.kis import (
     KST, TR_CCNL_KRX, TR_CCNL_TOTAL, KISConfig, KISConfigError, KISError, KISRestClient, KISWebSocketClient, Tick,
     TokenManager,
 )
 from .config import OUTPUT_DIR
 from .data.ohlcv import SESSION_CLOSE, SESSION_OPEN, now_kst, session_fraction
-from .patterns.base import BREAKOUT, FAILED, FORMING, NEAR_PIVOT, STAGE_LABELS
-from .patterns.three_weeks_tight import FIXED_HOLIDAYS, KRX_EXTRA_HOLIDAYS
+from .krx import FIXED_HOLIDAYS, KRX_EXTRA_HOLIDAYS
+from .patterns.base import BREAKOUT, FAILED, NEAR_PIVOT, STAGE_LABELS
 
 NEAR, BREAKOUT_HIT, PULLBACK, STOP = "near", "breakout", "pullback", "stop"
 KIND_LABELS = {NEAR: "피벗 근접", BREAKOUT_HIT: "피벗 돌파", PULLBACK: "눌림 구간 진입", STOP: "손절가 이탈"}
@@ -76,7 +81,7 @@ _EXTRA_HOLIDAYS = frozenset(KRX_EXTRA_HOLIDAYS)
 
 
 def krx_holiday(d: date) -> bool:
-    """KRX 휴장일(평일)인가 — 고정 휴장일 + 알려진 비정기 휴장일 (patterns.three_weeks_tight 의 달력).
+    """KRX 휴장일(평일)인가 — 고정 휴장일 + 알려진 비정기 휴장일 (krx.py 의 달력).
     달력에 없는 새 휴장일은 모른다 (그때는 시세가 지난 거래일 것이라 알림이 나가지 않고 10:15 에 종료)."""
     return d.strftime("%m-%d") in FIXED_HOLIDAYS or d.strftime("%Y-%m-%d") in _EXTRA_HOLIDAYS
 
@@ -87,17 +92,17 @@ class WatchItem:
     code: str
     name: str
     market: str
-    pattern: str                        # 패턴 키 (vcp, big_value_pullback, ...)
+    pattern: str                        # 패턴 키 (cup_with_handle, ...)
     label: str                          # 패턴 한글명
     stage: str | None
     pivot: float
     stop: float | None
-    reason: str                         # 감시 사유: 돌파 · 피벗 근접 · 눌림 구간 · 눌림 대기 · 돌파 전 관찰 · 돌파 매수 대기 · 지정 종목
+    reason: str                         # 감시 사유: 돌파 · 피벗 근접 · 돌파 매수 대기 · 지정 종목 (눌림 구간 · 눌림 대기 — 지금 없음)
     composite: float
     ref_close: float                    # 마지막 확정 종가 (오늘 장중 봉 제외)
     avg_vol_50: float | None = None     # 50일 평균 거래량 (오늘 제외)
-    support: float | None = None        # 눌림목 50%선 (지정가)
-    zone_top: float | None = None       # 눌림 매수 구간 상단
+    support: float | None = None        # 눌림 매수 구간 하한(지정가) — 지금 채우는 패턴 없음
+    zone_top: float | None = None       # 눌림 매수 구간 상단 — 지금 채우는 패턴 없음
     plan: str = ""                      # 스캔의 진입 계획 문구
     breakout_date: str | None = None
 
@@ -110,8 +115,7 @@ class WatchItem:
         return STAGE_LABELS.get(self.stage or "", "-")
 
 
-_PRIORITY = {"지정 종목": -1, "돌파": 0, "피벗 근접": 0, "눌림 구간": 0, "돌파 전 관찰": 1, "눌림 대기": 1,
-             "돌파 매수 대기": 2}
+_PRIORITY = {"지정 종목": -1, "돌파": 0, "피벗 근접": 0, "돌파 매수 대기": 2}
 
 
 def _pos(x) -> float | None:
@@ -126,13 +130,12 @@ def watch_reason(s, r) -> str | None:
     """감시 사유. 대상이 아니면 None. r = 대표 결과(s.lead())."""
     if r is None or _pos(r.pivot) is None or r.stage == FAILED:
         return None
+    if (r.metrics or {}).get("attempt_consumed"):
+        # 컵 앤 핸들 식: 확인 안 된 돌파 시도(우측 림을 넘음)로 구조가 끝났다 — 다음 봉부터 식은 이 구조로 돌파를 판정하지 않는다
+        return None
     plan = (s.position or {}).get("plan", "") if r is s.lead() else ""
     if "관망" in plan:
         return None
-    if scoring.pullback_limit(r) is not None:
-        return {NEAR_PIVOT: "눌림 구간", FORMING: "눌림 대기"}.get(r.stage)
-    if r.name == "long_base_breakout" and (r.metrics or {}).get("pre_breakout"):
-        return "돌파 전 관찰"
     if r.stage == BREAKOUT:
         return "돌파"
     if r.stage == NEAR_PIVOT:
@@ -165,14 +168,12 @@ def last_close(df: pd.DataFrame | None, today: date, fallback: float) -> float:
 
 
 def _make_item(s, r, reason: str, today: date) -> WatchItem:
-    support = scoring.pullback_limit(r)
-    zone_top = scoring.pullback_zone_top(r) if support is not None else None
     df = s.ctx.df if s.ctx is not None else None
     return WatchItem(
         code=s.code, name=s.name, market=s.market, pattern=r.name, label=r.label, stage=r.stage,
         pivot=float(r.pivot), stop=_pos(r.stop), reason=reason, composite=float(s.score.composite),
-        ref_close=last_close(df, today, s.close), avg_vol_50=avg_volume(df, today), support=support,
-        zone_top=zone_top, plan=(s.position or {}).get("plan", "") if r is s.lead() else "",
+        ref_close=last_close(df, today, s.close), avg_vol_50=avg_volume(df, today),
+        plan=(s.position or {}).get("plan", "") if r is s.lead() else "",
         breakout_date=r.breakout_date,
     )
 
@@ -185,13 +186,10 @@ def select_watchlist(scan, top: int = 40, *, today: date | None = None,
     extra = {str(c).strip() for c in (codes or ()) if str(c).strip()}
     picked = []
     for s in scan.stocks:
-        r = s.lead()
+        # 감시 대상 베이스는 scoring.LIVE_PATTERNS(컵 앤 핸들)만 — 《차트의 기술》 새 기법은 검증 전이고 장중 '돌파' 뜻이
+        # 기법 규칙(피보 신호 뒤 피벗 = 진입가, 빗각 돌파 확인 = 종가)과 달라 넣지 않는다
+        r = s.live_lead() if hasattr(s, "live_lead") else s.lead()
         reason = watch_reason(s, r)
-        if reason is None:
-            lb = s.results.get("long_base_breakout")
-            if lb is not None and lb.detected and (lb.metrics or {}).get("pre_breakout") \
-                    and _pos(lb.pivot) and lb.stage != FAILED:
-                r, reason = lb, "돌파 전 관찰"
         forced = s.code in extra and r is not None and _pos(r.pivot) is not None
         if reason is None and forced:
             reason = "지정 종목"
@@ -277,11 +275,11 @@ def alert_text(it: WatchItem, kind: str, price: float, ratio: float | None, vol_
         return f"[근접] {it.name} {px} · 피벗 {it.pivot:,.0f}까지 {it.pivot / price - 1:+.1%} — 돌파 대기 · 잠정"
     if kind == PULLBACK:
         stop = f" · 손절: 종가 {it.stop:,.0f} 이탈" if it.stop else ""
-        return (f"[눌림] {it.name} {px} · 50%선 매수 구간 {it.support:,.0f}~{it.zone_top:,.0f} 진입{stop} · "
+        return (f"[눌림] {it.name} {px} · 매수 구간 {it.support:,.0f}~{it.zone_top:,.0f} 진입{stop} · "
                 f"잠정 — 종가 확인")
     if kind == STOP:
         if it.is_pullback:
-            what = "눌림목 손절은 종가 기준 — 종가 확인"
+            what = "눌림 구간 손절은 종가 기준 — 종가 확인"
         elif pre_entry(it):
             what = "돌파 전 — 매수 계획 보류, 종가 확인"
         else:
@@ -607,14 +605,14 @@ class LiveStatus:
 
 
 def _dist(it: WatchItem, price: float | None) -> tuple[float | None, str]:
-    """(정렬용 거리, 표시 문구). 눌림목은 매수 구간까지, 그 밖은 피벗까지."""
+    """(정렬용 거리, 표시 문구). 눌림 구간 항목은 매수 구간까지, 그 밖은 피벗까지."""
     if price is None:
         return None, "-"
     if it.is_pullback:
         if it.support <= price <= it.zone_top:
             return 0.0, "구간 안"
         if price < it.support:
-            return abs(price / it.support - 1), f"50%선 {price / it.support - 1:+.1%}"
+            return abs(price / it.support - 1), f"구간 하한 {price / it.support - 1:+.1%}"
         return abs(price / it.zone_top - 1), f"구간까지 {it.zone_top / price - 1:+.1%}"
     d = it.pivot / price - 1
     return abs(d), (f"{d:+.1%}" if d >= 0 else f"돌파 {-d:+.1%}")
@@ -726,8 +724,8 @@ def render_dashboard(engine: TriggerEngine, status: LiveStatus, *, now: datetime
         f"{f' (지난 시세 {engine.stale_ticks:,}건 — 알림 제외)' if engine.stale_ticks else ''} · "
         f"알림 {len(engine.store.rows)}건</span>"
         f"<span class='status'>{e(status.message)}</span></header>\n"
-        "<p class='note'><b>조회 전용 — 주문 기능 없음.</b> 장중 신호는 <b>잠정</b>입니다: 돌파는 종가가 피벗 위인지, "
-        "눌림목 손절은 종가로 확인하세요. 거래량 예상배수 = 누적 거래량 ÷ 장중 경과 비율(U자형 추정) ÷ 50일 평균 "
+        "<p class='note'><b>조회 전용 — 주문 기능 없음.</b> 장중 신호는 <b>잠정</b>입니다: 돌파는 종가가 피벗 위인지 "
+        "종가로 확인하세요. 거래량 예상배수 = 누적 거래량 ÷ 장중 경과 비율(U자형 추정) ÷ 50일 평균 "
         f"(✓ = {engine.vol_mult:.1f}배 이상). '지난 시세'(오늘 체결 전)는 알림에 쓰지 않고, 손절가를 깬 종목은 그날 "
         "매수 쪽 알림을 끕니다.</p>\n"
         "<div class='wrap'><table><thead><tr><th>종목</th><th>현재가</th><th>등락률</th><th>패턴/단계</th>"
@@ -1231,6 +1229,24 @@ def scan_cache_fresh(now: datetime | None = None) -> bool:
     return fetched >= _last_final_close(now or now_kst())
 
 
+def missing_codes_text(codes: Iterable[str], items: list, scan) -> list[str]:
+    """--codes 로 지정했지만 감시 목록에 못 든 종목의 이유 — 실시간 감시는 컵 앤 핸들(scoring.LIVE_PATTERNS)만 본다."""
+    got = {it.code for it in items}
+    missing = [c for c in codes if c not in got]
+    if not missing:
+        return []
+    cands = {s.code for s in getattr(scan, "stocks", None) or []}
+    head = "실시간 감시는 컵 앤 핸들(사용자 식)만 — 《차트의 기술》 기법(검증 전) 후보는 감시하지 않음"
+    out = []
+    nolive = [c for c in missing if c in cands]
+    other = [c for c in missing if c not in cands]
+    if nolive:
+        out.append(f"지정 종목 중 컵 앤 핸들 피벗이 없어(또는 관망) 제외: {', '.join(nolive)} — {head}")
+    if other:
+        out.append(f"지정 종목 중 컵 앤 핸들 스캔 후보가 아니라 제외: {', '.join(other)} — {head}")
+    return out
+
+
 def build_watchlist(*, top: int = 40, codes: Iterable[str] | None = None, offline: bool | None = None,
                     refresh: bool = False, verbose: bool = True, today: date | None = None,
                     out: Callable[[str], None] = print):
@@ -1252,7 +1268,10 @@ def build_watchlist(*, top: int = 40, codes: Iterable[str] | None = None, offlin
         ud = load_universe_data(cfg, refresh=refresh, offline=False, verbose=verbose)
     if ud.asof is None or not ud.ohlcv:
         raise RuntimeError("분석할 일봉 데이터가 없습니다 (캐시가 비었거나 수집 실패)")
-    scan = run_scan(ud, cfg, verbose=verbose, offline=bool(offline))
+    # 감시는 LIVE_PATTERNS(컵 앤 핸들)만 — 《차트의 기술》 기법 6개 · 보컬까지 돌리면 장 시작 전 스캔이 2배쯤 길어지고
+    # (오프라인 측정 약 156 초 vs 약 73 초) 결과는 버려진다. 대표 · 종합 점수 · 매수 계획도 감시하는 베이스에서 나온다
+    from . import scoring
+    scan = run_scan(ud, cfg, patterns=list(scoring.LIVE_PATTERNS), verbose=verbose, offline=bool(offline))
     return scan, select_watchlist(scan, top, today=today, codes=codes)
 
 
@@ -1445,11 +1464,10 @@ def _run(a) -> int:
     except Exception as e:
         print(f"감시 목록을 만들지 못했습니다: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
-    missing = [c for c in codes if c not in {it.code for it in items}]
-    if missing:
-        print(f"  지정 종목 중 스캔 후보가 아니거나 피벗이 없어 제외: {', '.join(missing)}")
+    for line in missing_codes_text(codes, items, scan):
+        print("  " + line)
     if not items:
-        print("감시할 종목이 없습니다 (돌파·피벗 근접·눌림목·돌파 매수 대기 후보 없음).")
+        print("감시할 종목이 없습니다 (돌파·피벗 근접·돌파 매수 대기 후보 없음).")
         return 0
     asof = f"{scan.asof:%Y-%m-%d}" if scan.asof is not None else "-"
     print(f"스캔 기준일 {asof} · 후보 {len(scan.stocks)}종목 중")

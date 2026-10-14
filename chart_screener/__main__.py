@@ -6,10 +6,10 @@
     python -m chart_screener scan --skip-holiday  # 휴장일이고 캐시가 이미 최신이면 스캔하지 않음 (작업 스케줄러용)
     python -m chart_screener analyze 005930       # 한 종목 모든 패턴 판정 상세
     python -m chart_screener market               # KOSPI/KOSDAQ 시장 방향
-    python -m chart_screener backtest vcp         # 워크포워드 신호 성과 검증
+    python -m chart_screener backtest cup_with_handle   # 워크포워드 신호 성과 검증 (매일 판정이라 오래 걸림)
     python -m chart_screener track                # 스캔 일지(output/journal.csv) 후보의 사후 성과 집계
     python -m chart_screener update               # 데이터만 갱신
-    python -m chart_screener live                 # 실시간 감시: 후보 + 증권사(KIS)/네이버 시세 → 돌파·눌림·손절 알림
+    python -m chart_screener live                 # 실시간 감시: 후보 + 증권사(KIS)/네이버 시세 → 피벗 근접·돌파 알림
     python -m chart_screener live --check         # 한국투자증권 연결 점검 (설정·토큰·현재가·개장일·웹소켓)
     python -m chart_screener news --codes 010170  # 종목 뉴스 제목(증권사) → cache/kis/news/<code>.json
 
@@ -65,9 +65,11 @@ def _names(items, k: int = 8) -> str:
     return ", ".join(out) + (f" 외 {len(items) - k}" if len(items) > k else "")
 
 
-def _print_changes(summary: dict, prev_asof: str | None, rerun: bool = False) -> None:
+def _print_changes(summary: dict, prev_asof: str | None, rerun: bool = False, legacy: bool = False) -> None:
     if not prev_asof:
-        print("변화: 비교할 이전 기준일 스캔 없음 " + ("(같은 기준일 재실행 — 일지 행 교체)" if rerun else "(일지 첫 기록)"))
+        why = ("같은 기준일 재실행 — 일지 행 교체" if rerun
+               else "패턴 초기화(2026-10-14) 뒤 첫 기록 — 옛 패턴 기록과는 비교하지 않음" if legacy else "일지 첫 기록")
+        print(f"변화: 비교할 이전 기준일 스캔 없음 ({why})")
         return
     counts = " · ".join(f"{k} {len(summary.get(k, []))}" for k in ("신규", "돌파", "단계상승", "실패", "탈락"))
     print(f"변화 (직전 {prev_asof} 대비): {counts}")
@@ -138,7 +140,7 @@ def cmd_scan(a) -> int:
     from . import journal, kis_scan, value_list
     from .patterns import REGISTRY
     from .report import write_report
-    from .scanner import enrich_investor, refilter_candidates, run_scan, to_frame
+    from .scanner import enrich_investor, refresh_flow_patterns, run_scan, to_frame
     from .universe_data import load_universe_data
 
     pats, bad = _parse_patterns(a.patterns)
@@ -190,8 +192,7 @@ def cmd_scan(a) -> int:
         try:
             got = hub.enrich(scan, verbose=tty)
             print(f"증권사 자료 반영: 수급 {got['flows']} · 투자의견 {got['opinion']} · 추정실적 {got['estimate']}종목 "
-                  f"(후보 {len(scan.stocks)}" + (f" + 저평가 목록 {got['value']}" if got.get("value") else "")
-                  + ", CAN SLIM I 재계산)")
+                  f"(후보 {len(scan.stocks)}" + (f" + 저평가 목록 {got['value']}" if got.get("value") else "") + ")")
         except Exception as e:   # 후보 자료 단계 실패 — 리포트 · 일지는 그대로 쓴다
             hub.res.fatal = hub.res.fatal or f"{type(e).__name__}: {e} (후보 자료 단계에서 중단)"
             print(f"증권사 후보 자료 실패: {type(e).__name__}: {e}", file=sys.stderr)
@@ -199,10 +200,10 @@ def cmd_scan(a) -> int:
         k = enrich_investor(scan, top=a.investor_top, offline=a.offline, verbose=tty, only_missing=hub.used)
         if k or not hub.used:
             print(f"수급 자료 반영(네이버): 상위 {k}종목" + (" — 증권사 수급이 없는 종목만" if hub.used else "")
-                  + " (CAN SLIM I 재계산)")
-    gone, came = refilter_candidates(scan)
-    if gone or came:
-        print(f"수급 반영 뒤 후보 조정: 빠짐 {gone} · 들어옴 {came} (CAN SLIM 재계산)")
+                  + " (표시용)")
+    n_flow = refresh_flow_patterns(scan, cfg)      # 60일선 수급 돌파 — 붙인 수급으로 라벨을 다시 잰다(점수 · 후보 불변)
+    if n_flow:
+        print(f"60일선 수급 돌파 수급 라벨 다시 판정: {n_flow}종목")
     scan.kis = hub.report_info()
     for line in hub.timing_lines():
         print(line)
@@ -219,10 +220,11 @@ def cmd_scan(a) -> int:
         try:
             jpath = Path(a.journal) if a.journal else None
             jold = journal.load_journal(jpath)
-            rerun = bool(len(jold)) and f"{ud.asof:%Y-%m-%d}" in set(jold["asof"])
+            cur = journal.is_current(jold)
+            rerun = bool(cur.any()) and f"{ud.asof:%Y-%m-%d}" in set(jold.loc[cur, "asof"])
             summary = journal.annotate(scan, jpath, journal=jold)
             journal.append(scan, jpath)
-            _print_changes(summary, scan.prev_asof, rerun)
+            _print_changes(summary, scan.prev_asof, rerun, legacy=bool((~cur).any()))
         except Exception as e:
             print(f"일지 기록 생략: {type(e).__name__}: {e}")
     elif pats is not None and not a.no_journal:
@@ -261,7 +263,7 @@ def cmd_scan(a) -> int:
 
 def cmd_analyze(a) -> int:
     from .patterns import REGISTRY
-    from .scanner import scan_one
+    from .scanner import attach_panel, scan_one
     from .universe_data import build_context, load_universe_data, passes_universe_filter
 
     cfg = _cfg_years(a)
@@ -271,9 +273,18 @@ def cmd_analyze(a) -> int:
         print(f"{a.code}: 데이터 없음 (상장 120일 미만이거나 코드 오류)")
         return 1
     ok, why = passes_universe_filter(ctx)
+    # 기법 공통 칸: 공시위험만 넣는다 — 업종 · 테마 강도와 업종 RS 는 전 종목 단면이라 scan 에서만(체크리스트 2 · 5 번 '모름')
+    from . import technique_panel
+    risk, _, _ = technique_panel.load_risk(cfg)
+    ctx.info["risk"] = risk.get(ctx.code) if risk else None
     s = scan_one(ctx)
+    attach_panel(s, cfg)
     print(f"{s.name} ({s.code}, {s.market})  종가 {s.close:,.0f} ({s.change_pct:+.2%})  RS {s.rs or '-'}  "
           f"종합 {s.score.composite}")
+    if s.panel:
+        c = s.panel["counts"]
+        print(f"  체크리스트 10 (검증 전 · 점수 밖, {s.panel['pattern'] or '대표 없음'} 기준): "
+              f"통과 {c['pass']} · 경고 {c['warn']} · 모름 {c['unknown']}")
     print("  점수 근거: " + " / ".join(s.score.notes) + "  (업종·테마 가감은 전 종목 scan 에서만 반영)")
     if s.position:
         p = s.position
@@ -294,7 +305,7 @@ def cmd_analyze(a) -> int:
         from .report import write_report
         from .scanner import ScanResult
         scan = ScanResult(asof=ud.asof, generated_at=pd.Timestamp.now(), market=ud.market, stocks=[s],
-                          scanned=1, elapsed=0, patterns=list(REGISTRY))
+                          scanned=1, elapsed=0, patterns=list(REGISTRY), market_ctx=technique_panel.market_panel(ud))
         out = Path(a.out or OUTPUT_DIR)
         path = write_report(scan, out / f"analyze_{a.code}.html")
         print(f"\n리포트: {path}")
@@ -316,7 +327,7 @@ def cmd_backtest(a) -> int:
     hz = tuple(int(x) for x in a.horizons.split(","))
     bt = BacktestConfig(pattern=a.pattern, mode=a.mode, step=a.step if a.mode == "stage" else 1,
                         since=a.since, horizons=hz, stages=tuple(a.stages.split(",")),
-                        history_days=_cfg_years(a).data.history_days if a.years else None)
+                        history_days=_cfg_years(a).data.history_days if a.years else None, until=a.until)
     codes = [c for c in a.codes.split(",") if c] or None
     try:
         ev = run_backtest(bt, workers=a.workers, codes=codes)
@@ -334,9 +345,14 @@ def cmd_backtest(a) -> int:
     print(f"[{a.pattern}] 신호 {len(ev)}건 ({ev['date'].min()} ~ {ev['date'].max()})")
     with pd.option_context("display.width", 200, "display.unicode.east_asian_width", True):
         print(summ.to_string(index=False))
+    tg = f"+{bt.target:.0%}"
+    ns = summ.attrs.get("no_stop")
     if summ.attrs.get("outcome"):
         oc = summ.attrs["outcome"]
-        print(f"  손절 전 +20% 도달 {oc.get('target', 0)}% · 손절 {oc.get('stop', 0)}% · 미결 {oc.get('open', 0)}%")
+        print(f"  손절 전 {tg} 도달 {oc.get('target', 0)}% · 손절 {oc.get('stop', 0)}% · 미결 {oc.get('open', 0)}%"
+              + (f" (손절가 있는 신호 {summ.attrs.get('outcome_n')}건만)" if ns else ""))
+    if ns:
+        print(f"  손절 규칙 없음 {ns['n']}건 — 손절 비율 해당 없음 · {max(hz)}봉 안 {tg} 도달 {ns['target']}%")
     if a.mode == "stage":  # 같은 패턴 구간(시작일)이 여러 번 잡히는 눌림목형 대비: 첫 진입만
         fe = summarize_first_entries(ev, hz)
         print(f"\n[첫 진입만] (종목·패턴 시작일마다 첫 신호 1건) 신호 {len(first_entries(ev))}건")
@@ -422,11 +438,14 @@ def cmd_news(a) -> int:
     return 0
 
 
-LIVE_HELP = "실시간 감시 — 스캔 후보 + 증권사(한국투자증권)/네이버 시세 → 돌파·눌림·손절 알림 (조회 전용, 주문 없음)"
+LIVE_HELP = "실시간 감시 — 스캔 후보 + 증권사(한국투자증권)/네이버 시세 → 피벗 근접·돌파 알림 (조회 전용, 주문 없음)"
 LIVE_DESC = (
-    "스캔 후보 중 돌파·피벗 근접·300억 눌림목·돌파 전 관찰·돌파 매수 대기 종목(최대 40)을 실시간 시세로 감시해 "
-    "피벗 근접·돌파(하루 예상 거래량 배수 포함)·눌림 구간 진입·손절가 이탈을 알리고 output/live.html 대시보드를 갱신한다. "
-    "조회 전용: 주문(매수·매도) 기능이 없다. 장중 신호는 잠정이므로 종가로 확인할 것. "
+    "스캔 후보 중 돌파 · 피벗 근접 · 피벗 돌파 매수 대기 종목(최대 40, --codes 로 지정 종목 추가)을 실시간 시세로 감시해 "
+    "피벗 근접·돌파(하루 예상 거래량 배수 포함)를 알리고 output/live.html 대시보드를 갱신한다. "
+    "지금 대표 패턴은 컵 앤 핸들(사용자 식) 하나 — 식에 손절 규칙이 없어 손절가 이탈 알림이 없고, "
+    "눌림 구간 알림도 채우는 패턴이 없어 나오지 않는다(2026-10-14 패턴 초기화). 확인 안 된 돌파 시도로 식에서 끝난 구조는 감시하지 않는다. "
+    "조회 전용: 주문(매수·매도) 기능이 없다. 장중 신호는 잠정이므로 종가로 확인할 것 "
+    "(식의 돌파 확인 = 종가 ≥ 진입가 · 거래량 1.4배). "
     "한국투자증권 설정: ~/KIS/config/kis_devlp.yaml (공식 샘플 양식)."
 )
 
@@ -488,6 +507,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="breakout_day: 돌파 당일 신호(매일 실행) / stage: step 간격·단계 기준")
     s.add_argument("--step", type=int, default=5, help="stage 모드에서 몇 거래일마다 탐지할지")
     s.add_argument("--since", default=None, help="YYYY-MM-DD 이후 신호만")
+    s.add_argument("--until", default=None, help="YYYY-MM-DD 까지의 봉만 (장중 미완성 봉 빼기 등)")
     s.add_argument("--horizons", default="5,20,60")
     s.add_argument("--stages", default="breakout")
     s.add_argument("--codes", default="")
@@ -513,7 +533,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--source", choices=["auto", "kis", "naver"], default="auto",
                    help="시세 출처: auto(KIS 설정·토큰이 되면 KIS, 아니면 네이버) · kis(한국투자증권) · naver")
     s.add_argument("--top", type=int, default=40, help="감시 종목 수 (KIS 실시간 구독 한도 40)")
-    s.add_argument("--codes", default="", help="꼭 감시할 종목코드 (쉼표 구분, 피벗이 있는 스캔 후보만)")
+    s.add_argument("--codes", default="", help="꼭 감시할 종목코드 (쉼표 구분, 컵 앤 핸들 피벗이 있는 스캔 후보만 — 《차트의 기술》 기법은 감시 안 함)")
     s.add_argument("--interval", type=float, default=None,
                    help="조회 간격(초): 네이버 기본 10, KIS 웹소켓 실패 시 REST 조회 기본 15")
     s.add_argument("--venue", choices=["krx", "total"], default="krx",

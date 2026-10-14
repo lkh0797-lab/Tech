@@ -60,7 +60,7 @@ class Config:
     # ---- 300억 장대양봉 레이더 (ScanResult.radar)
     radar_days: int = 10                # 최근 이 거래일 안의
     radar_min_change: float = 0.07      # +7% 이상 & 거래대금 big_value_threshold 이상 양봉
-    # 패턴별 설정 덮어쓰기: {"vcp": VCPConfig(...), ...}
+    # 패턴별 설정 덮어쓰기: {"cup_with_handle": cwh_reference.Config(profile="deep", ...), ...}
     patterns: dict = field(default_factory=dict)
 
     def pattern_cfg(self, name: str, default_factory):

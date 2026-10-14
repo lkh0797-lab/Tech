@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from chart_screener.data import sector as sd
-from chart_screener.patterns.trend_template import evaluate
+from chart_screener.trend import evaluate
 from chart_screener.sector import (STRENGTH_COLUMNS, SectorConfig, group_strength, stock_groups,
                                    stock_metrics, tt_pass)
 from chart_screener.universe_data import UniverseData

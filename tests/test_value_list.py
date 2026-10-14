@@ -96,8 +96,9 @@ def test_undervalued_pattern_reads_ctx_info_and_never_creates_candidates():
 
 def test_chip_order_puts_undervalued_after_vocal():
     chips = [n for n in rhtml.CHIP_ORDER if n in REGISTRY]
-    assert chips == ["canslim", "pocket_pivot", "vocal", "undervalued", "absorb", "stage2"]
-    assert rhtml.DETECTED_ORDER[-3:] == ["vocal", "absorb", "stage2"] and "undervalued" in rhtml.DETECTED_ORDER
+    # 베이스 칩 뒤: 신호(60일선 · 월봉 적삼병) · 관찰(10% 주도주 · 보컬) · 저평가 종목 — 저평가는 여전히 보컬 바로 뒤
+    assert chips == ["ma60_supply", "red_three_monthly", "day_leader", "vocal", "undervalued"]
+    assert rhtml.DETECTED_ORDER[-1] == "vocal" and "undervalued" in rhtml.DETECTED_ORDER
 
 
 # ---------------------------------------------------------------- 스캔
@@ -167,7 +168,8 @@ def test_scan_without_value_file_is_unchanged(tmp_path, monkeypatch):
 def test_report_value_tab_rows_cards_and_short_charts(tmp_path, monkeypatch):
     ud, vl = _universe(tmp_path, monkeypatch)
     scan = _scan(ud, vl, monkeypatch)
-    scan.value_scans[B].results["absorb"] = PatternResult(name="absorb", label="바닥 투매 흡수", detected=True, stage=FORMING)
+    scan.value_scans[B].results["cup_with_handle"] = PatternResult(name="cup_with_handle", label="컵 앤 핸들", detected=True,
+                                                                   stage=FORMING)
     html = render(build_payload(scan))
     d = _data(html)
     v = d["value"]
@@ -175,7 +177,7 @@ def test_report_value_tab_rows_cards_and_short_charts(tmp_path, monkeypatch):
     rows = {r["code"]: r for r in v["rows"]}
     assert [r["code"] for r in v["rows"]] == [A, B, C, D, E, F]              # 파일 순서 (기본 정렬은 화면에서 점수순)
     assert rows[A]["in_list"] and rows[A]["chart"]
-    assert not rows[B]["in_list"] and rows[B]["chart"] and ["absorb", "forming"] in rows[B]["pats"]
+    assert not rows[B]["in_list"] and rows[B]["chart"] and ["cup_with_handle", "forming"] in rows[B]["pats"]
     assert not rows[C]["chart"] and rows[C]["tier"] == "관찰" and rows[C]["why"] == ["빨간불"]
     assert all(n != "undervalued" for n, _ in rows[B]["pats"])               # 칩 자신은 '걸린 패턴'에서 뺀다
     for c in (D, E):
@@ -190,7 +192,7 @@ def test_report_value_tab_rows_cards_and_short_charts(tmp_path, monkeypatch):
     assert set(vs) == {B, F} and vs[B]["vonly"] is True
     assert len(vs[B]["ohlcv"]["t"]) <= rhtml.VALUE_CHART_BARS and len(vs[B]["ma"]["sma50"]) == len(vs[B]["ohlcv"]["t"])
     assert set(vs[B]["patterns"]) <= set(vs[B]["detected"]) | set(rhtml.VALUE_KEEP)
-    assert "undervalued" in vs[B]["patterns"] and "absorb" in vs[B]["patterns"]
+    assert "undervalued" in vs[B]["patterns"] and "cup_with_handle" in vs[B]["patterns"]
     assert "undervalued" in d["stocks"][0]["detected"] and "undervalued" in d["chip_patterns"]
     assert d["chip_patterns"].index("undervalued") == d["chip_patterns"].index("vocal") + 1
     assert d["info_patterns"] == ["undervalued"]
@@ -251,10 +253,15 @@ def test_value_chart_cap_prefers_rows_with_tech_patterns(tmp_path, monkeypatch):
         _row(A, score=75.0), _row(B, score=50.0), _row(C, tier="관찰", score=80.9, tier_why=["빨간불"]),
         _row(D, score=60.0), _row(E, tier="관찰", score=50.0), _row(F, score=99.0)])
     scan = _scan(ud, vl, monkeypatch)
-    scan.value_scans[B].results["absorb"] = PatternResult(name="absorb", label="바닥 투매 흡수", detected=True, stage=FORMING)
+    scan.value_scans[B].results["cup_with_handle"] = PatternResult(name="cup_with_handle", label="컵 앤 핸들", detected=True,
+                                                                   stage=FORMING)
+    # 합성 봉에 《차트의 기술》 기법(60일선 돌파 등)이 우연히 걸릴 수 있다 — 이 시험의 F 는 '정보 칩만' 걸린 종목으로 고정
+    for n, r in scan.value_scans[F].results.items():
+        if n != "undervalued":
+            r.detected = False
     monkeypatch.setattr(rhtml, "MAX_VALUE_CHARTS", 1)
     d = build_payload(scan)
     rows = {r["code"]: r for r in d["value"]["rows"]}
-    # F 는 저평가 점수가 더 높지만 정보 칩만 걸렸다 — 상한 1개면 Tech 패턴(바닥 투매 흡수)이 걸린 B 가 차트를 갖는다
+    # F 는 저평가 점수가 더 높지만 정보 칩만 걸렸다 — 상한 1개면 Tech 패턴(컵 앤 핸들)이 걸린 B 가 차트를 갖는다
     assert [s["code"] for s in d["value_stocks"]] == [B] and rows[B]["chart"]
     assert not rows[F]["chart"] and rows[F]["nochart"] == "차트 상한 1개 밖"

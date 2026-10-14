@@ -9,11 +9,10 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from chart_screener import kis_scan, scoring
+from chart_screener import kis_scan
 from chart_screener.backtest import BacktestConfig, run_backtest
 from chart_screener.broker.kis import KST, KISConfig, TokenManager
 from chart_screener.data import kis_market as km
-from chart_screener.scanner import ScanResult, refilter_candidates
 from chart_screener.value_list import parse_value
 
 from test_kis_market import DAY, FakeClient, opinion_rows
@@ -199,39 +198,9 @@ def test_value_list_apply_status():
     assert vl.counts() == {"저평가": 1, "관찰": 2}
 
 
-# ---------------------------------------------------------------- 수급 반영 뒤 후보 다시 맞추기
-class _S:
-    def __init__(self, code, cand, composite=50.0, ctx=True, thin=None):
-        self.code, self.name, self.market, self.close, self.rs = code, code, "KOSPI", 1000.0, 80.0
-        self.results = {"cand": cand}
-        self.score = type("Sc", (), {"composite": composite})()
-        self.ctx = object() if ctx else None
-        self.thin = thin
-
-    def display_lead(self):
-        return None
-
-
-def test_refilter_candidates(monkeypatch):
-    monkeypatch.setattr(scoring, "is_candidate", lambda results, rs=None: results["cand"])
-    a, b, c, d, e = _S("A", True, 60), _S("B", False, 70), _S("C", True, 80), _S("D", True, thin="주가"), _S("E", True)
-    f = _S("F", True)
-    f.kst = ["관리종목"]                                          # 스캔 때 비후보라 excluded 에 없던 관리종목
-    scan = ScanResult(asof=None, generated_at=None, market={}, stocks=[a, b], scanned=2, elapsed=0.0, patterns=[],
-                      value_scans={"C": c, "D": d, "E": e, "F": f}, excluded=[{"code": "E"}])
-    assert refilter_candidates(scan) == (1, 1)
-    assert [s.code for s in scan.stocks] == ["C", "A"]           # B 빠짐 · C 들어옴 (D 문턱 밑 · E · F 상태 제외는 안 들어옴)
-    assert scan.dropped[-1]["code"] == "B" and "CAN SLIM" in scan.dropped[-1]["reason"] and b.ctx is None
-    assert scan.excluded[-1]["code"] == "B"                      # 일지 비교 뒤에도 사유가 남게
-    scan.include_all = True
-    assert refilter_candidates(scan) == (0, 0)
-
-
 # ---------------------------------------------------------------- 백테스트: 잴 수 없는 관찰 패턴은 이유와 함께 거절
 def test_backtest_rejects_unmeasurable_patterns():
     with pytest.raises(ValueError, match="외부 파일"):
         run_backtest(BacktestConfig(pattern="undervalued"))
-    with pytest.raises(ValueError, match="--mode stage"):
-        run_backtest(BacktestConfig(pattern="absorb"))
-    with pytest.raises(ValueError, match="near_pivot"):
-        run_backtest(BacktestConfig(pattern="absorb", mode="stage"))          # 기본 단계 breakout 은 absorb 에 없다
+    with pytest.raises(ValueError, match="알 수 없는 패턴"):
+        run_backtest(BacktestConfig(pattern="absorb"))                        # 2026-10-14 제거된 옛 탐지기

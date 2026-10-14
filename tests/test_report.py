@@ -30,7 +30,7 @@ def _breadth(nh_nl=12, pct50=54.1):
 
 def new_scan() -> ScanResult:
     a, b = _stock("0015N0", "알파벳코드"), _stock("123456", "둘째", seed=7)
-    a.badge, a.prev_stage, a.leader = "단계상승", "forming", True
+    a.badge, a.prev_stage = "단계상승", "forming"
     a.groups = {"sector": "반도체", "sector_rank_pct": 0.62, "themes": [["HBM", 0.97], ("로봇", np.float64(0.4))],
                 "themes_all": ["HBM", "로봇", "소규모테마"], "best_rank_pct": 0.97}
     a.position = {"entry": 10690.0, "stop": 9900.0, "risk_pct": 0.0739, "shares": 1265, "amount": 13522850.0,
@@ -66,7 +66,7 @@ def new_scan() -> ScanResult:
                 "steps": [{"step": "status", "n": 2, "ok": 2, "fail": 0, "secs": 1.2}]}
     scan.account = {"size": 50_000_000.0, "risk_per_trade": 0.01, "max_position_pct": 0.2,
                     "max_entry_risk": 0.1, "max_liquidity_pct": 0.02}
-    scan.dropped = [{"code": "005930", "name": "삼성전자", "market": "KOSPI", "pattern": "vcp", "stage": "near_pivot",
+    scan.dropped = [{"code": "005930", "name": "삼성전자", "market": "KOSPI", "pattern": "cup_with_handle", "stage": "near_pivot",
                      "composite": 71.2, "close": 70_000.0, "asof": "2026-10-06"}, "000660"]
     return scan
 
@@ -115,7 +115,9 @@ def test_new_fields_in_payload_and_html():
                                "score": None, "close": None, "reason": None}
 
     a, b = d["stocks"]
-    assert a["code"] == "0015N0" and a["badge"] == "단계상승" and a["prev_stage"] == "forming" and a["leader"] is True
+    assert a["code"] == "0015N0" and a["badge"] == "단계상승" and a["prev_stage"] == "forming"
+    assert "leader" not in a                                   # 주도주(베이스 없음)는 2026-10-14 제거
+    assert set(a["bd"]) >= {"pattern_part", "rs_part", "w_pattern", "w_rs", "w", "notes"} and "tech_part" not in a["bd"]
     assert a["groups"]["best"] == ["HBM", "테마", 0.97]
     assert a["groups"]["themes"] == [["HBM", 0.97], ["로봇", 0.4]] and a["groups"]["themes_other"] == ["소규모테마"]
     assert a["pos"]["shares"] == 1265 and a["pos"]["plan"].startswith("피벗") and a["pos"]["cap"] == "위험"
@@ -127,7 +129,7 @@ def test_new_fields_in_payload_and_html():
     assert k["eps_e"] == [["2026.12E", 1200], ["2027.12E", None]]
     assert k["opinions"] == [{"date": "2026-09-23", "broker": "유안타", "opinion": "BUY", "target": 13500}]
     assert d["kis"]["on"] is True and d["kis"]["line"].startswith("증권사 자료: 상태 2") and d["kis"]["real_value"]
-    assert d["observe_patterns"] == ["vocal", "absorb", "stage2"]
+    assert d["observe_patterns"] == ["day_leader", "vocal"]           # 2026-10-14 《차트의 기술》 10% 주도주(관찰) 추가
 
     for needle in ('id="v-radar"', 'id="v-groups"', 'id="dropBox"', "관심 목록 (매수 신호 아님)", "주도 업종·테마",
                    "거래대금 300억 레이더", 'id="acct"', 'id="riskp"', 'id="dPlan"', 'id="dPos"', "주도주",
@@ -141,7 +143,7 @@ def test_old_scan_renders_without_new_fields():
     assert d["radar"] is None and d["groups"] is None and d["dropped"] is None
     assert d["breadth"] is None and d["prev_asof"] is None and d["account"] is None
     s = d["stocks"][0]
-    assert s["badge"] is None and s["pos"] is None and s["groups"] is None and s["leader"] is False
+    assert s["badge"] is None and s["pos"] is None and s["groups"] is None
     assert d["kis"] is None and s["kst"] == [] and s["kis"] is None
     assert len(s["ohlcv"]["t"]) == len(s["ohlcv"]["c"])
 

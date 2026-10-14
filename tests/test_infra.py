@@ -62,14 +62,35 @@ def test_market_correction_then_ftd():
     assert st.state in (CONFIRMED, CORRECTION)
 
 
-def test_trend_template_registered_and_passes_uptrend():
-    assert "trend_template" in REGISTRY
+def test_trend_template_is_helper_not_pattern_and_passes_uptrend():
+    # 2026-10-14 패턴 초기화: 트렌드 템플릿은 칩 · 점수에서 빠지고 업종 강도(sector.tt_pass)의 기준 계산으로만 남았다
+    from chart_screener.trend import evaluate
+    assert "trend_template" not in REGISTRY
     df = make_ohlcv([(0, 50), (300, 140)], noise=0.004, seed=1)
-    r = REGISTRY["trend_template"][1](make_context(df, rs=95))
-    assert r.detected, r.warnings
+    assert evaluate(make_context(df, rs=95))["passed"] == 8
     df_down = make_ohlcv([(0, 140), (300, 60)], noise=0.004, seed=1)
-    r2 = REGISTRY["trend_template"][1](make_context(df_down, rs=20))
-    assert not r2.detected
+    assert evaluate(make_context(df_down, rs=20))["passed"] < 8
+
+
+def test_registry_after_pattern_reset():
+    # 옛 탐지기 13개 제거 — 남은 것: 사용자 식 컵 앤 핸들 · 보컬(관찰) · 저평가 종목(정보 칩)
+    # + 2026-10-14 《차트의 기술》 영상 기법 6개 (docs/2026-10-14-chart-techniques-*.md) — 라벨은 스펙 그대로
+    from chart_screener import techniques as tq
+    assert set(REGISTRY) == {"cup_with_handle", "vocal", "undervalued"} | set(tq.PATTERN_LABELS)
+    assert REGISTRY["cup_with_handle"][0] == "컵 앤 핸들 (사용자 식)"      # 지운 옛 '컵 앤 핸들'과 라벨로도 구별
+    assert {n: REGISTRY[n][0] for n in tq.PATTERN_LABELS} == {
+        "red_three_monthly": "월봉 적삼병", "fib_pullback": "피보나치 눌림 반등", "trendline_break": "빗각 추세선 돌파",
+        "trendline_fib": "빗각 돌파 + 피보 눌림", "day_leader": "10% 주도주 (단타 관찰)", "ma60_supply": "60일선 수급 돌파"}
+    assert not set(REGISTRY) & {"absorb", "stage2", "canslim", "vcp", "cup_handle", "pocket_pivot"}
+
+
+def test_help_text_describes_current_patterns_only():
+    import chart_screener
+    from chart_screener.__main__ import LIVE_DESC, LIVE_HELP
+    for gone in ("300억", "돌파 전 관찰", "눌림 구간 진입·손절가 이탈을 알리고"):
+        assert gone not in LIVE_DESC and gone not in LIVE_HELP, gone
+    assert "손절가 이탈 알림이 없고" in LIVE_DESC
+    assert "지금 패턴: 컵 앤 핸들(사용자 식" in chart_screener.__doc__
 
 
 # ---------------------------------------------------------------- 캐시 신선도 · 장중 미완성 봉

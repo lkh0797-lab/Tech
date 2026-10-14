@@ -1,6 +1,7 @@
-"""마크 미너비니 트렌드 템플릿 (Stage 2 상승 추세 판정).
+"""미너비니 트렌드 템플릿 8개 기준 — 업종·테마 강도(sector.py)의 'TT 통과 비율'에 쓰는 계산.
 
-VCP·컵앤핸들 등 모든 '상승 지속형 베이스' 패턴의 전제 조건으로 사용된다.
+패턴이 아니다(REGISTRY 에 없음 — 칩 · 점수 · 후보에 안 쓴다). 2026-10-14 패턴 초기화 때 옛 탐지기
+patterns/trend_template.py 의 설정 · 평가 함수만 값 그대로 옮겼다 (sector.tt_pass 가 같은 규칙인지 맞춰 보는 기준).
 
 기준 (Minervini, *Trade Like a Stock Market Wizard*):
  1. 종가 > 150일선, 종가 > 200일선
@@ -10,7 +11,7 @@ VCP·컵앤핸들 등 모든 '상승 지속형 베이스' 패턴의 전제 조�
  5. 종가 > 50일선
  6. 종가가 52주 최저가 대비 +30% 이상
  7. 종가가 52주 최고가 대비 -25% 이내
- 8. RS 레이팅 70 이상 (80~90 이상이 바람직)
+ 8. RS 레이팅 70 이상
 """
 from __future__ import annotations
 
@@ -18,7 +19,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .base import PatternResult, StockContext, hline, register
+from .patterns.base import StockContext
+
+CFG_KEY = "trend_template"     # Config.patterns 덮어쓰기 키 (예전과 같은 이름)
 
 
 @dataclass
@@ -27,12 +30,12 @@ class TrendTemplateConfig:
     above_52w_low: float = 0.30
     within_52w_high: float = 0.25
     rs_min: float = 70.0
-    min_pass_for_detect: int = 8     # 8개 모두 충족해야 detected
+    min_pass_for_detect: int = 8     # 8개 모두 충족해야 통과
 
 
 def evaluate(ctx: StockContext, cfg: TrendTemplateConfig | None = None, at: int = -1) -> dict:
-    """``at`` 봉 시점의 8개 기준 평가 결과 dict (다른 패턴에서 재사용)."""
-    cfg = cfg or ctx.cfg.pattern_cfg("trend_template", TrendTemplateConfig)
+    """``at`` 봉 시점의 8개 기준 평가 결과 dict."""
+    cfg = cfg or ctx.cfg.pattern_cfg(CFG_KEY, TrendTemplateConfig)
     i = at if at >= 0 else ctx.n + at
     c = float(ctx.close.iloc[i])
     s50, s150, s200 = (float(ctx.sma(n).iloc[i]) for n in (50, 150, 200))
@@ -65,37 +68,3 @@ def evaluate(ctx: StockContext, cfg: TrendTemplateConfig | None = None, at: int 
         "from_52w_low": c / lo52 - 1 if lo52 else np.nan,
         "from_52w_high": c / hi52 - 1 if hi52 else np.nan,
     }
-
-
-_DESC = {
-    "c>150&200": "종가가 150일선·200일선 위",
-    "150>200": "150일선 > 200일선 (정배열)",
-    "200상승": "200일선 1개월 이상 상승",
-    "50>150&200": "50일선 > 150·200일선",
-    "c>50": "종가가 50일선 위",
-    "52주저점+30%": "52주 저점 대비 +30% 이상",
-    "52주고점-25%이내": "52주 고점 대비 -25% 이내",
-    "RS": "RS 레이팅 기준 충족",
-}
-
-
-@register("trend_template", "트렌드 템플릿(Stage 2)")
-def detect(ctx: StockContext) -> PatternResult:
-    cfg = ctx.cfg.pattern_cfg("trend_template", TrendTemplateConfig)
-    res = PatternResult(name="trend_template", label="트렌드 템플릿(Stage 2)")
-    if ctx.n < 220:
-        res.warnings.append(f"이력 부족 ({ctx.n}일 < 220일)")
-        return res
-    ev = evaluate(ctx, cfg)
-    for k, passed in ev["checks"].items():
-        (res.reasons if passed else res.warnings).append(("✔ " if passed else "✘ ") + _DESC[k])
-    res.detected = ev["passed"] >= cfg.min_pass_for_detect
-    # 점수: 충족 개수 + RS·52주 고점 근접도 가산
-    rs = ev["rs"] or 0
-    res.score = float(min(100, ev["passed"] / 8 * 70 + max(0, rs - 70) / 29 * 15
-                          + max(0, 0.25 + ev["from_52w_high"]) / 0.25 * 15))
-    res.metrics = {k: v for k, v in ev.items() if k != "checks"} | {"passed": ev["passed"]}
-    res.start_date = ctx.date(max(0, ctx.n - 252))
-    res.end_date = ctx.date(ctx.n - 1)
-    res.annotations = [hline(ev["high52"], "52주 고점", "#9e9e9e", "dotted")]
-    return res

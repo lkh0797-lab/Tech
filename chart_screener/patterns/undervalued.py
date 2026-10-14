@@ -15,8 +15,9 @@ from ..value_list import ENV
 from .base import PatternResult, StockContext, register
 
 NAME, LABEL = "undervalued", "저평가 종목"
-BT_NOTE = ("과거 검증(기업추적 차트 셋업 검증): 저평가 범위 안 바닥 투매 흡수 6개월 +3.4%p · 컵 12개월 +6~10%p "
-           "(앞 기간 약함, 표본 수백 건) — 관찰용, 점수 · 매수 계획에 안 들어감")
+BT_NOTE = ("과거 검증(기업추적 기술.py 자체 셋업 — 이 리포트의 칩과 다른 식): 저평가 범위 안 바닥 투매 흡수 6개월 +3.4%p · "
+           "컵 12개월 +6~10%p (앞 기간 약함, 표본 수백 건). 지금 Tech 컵 앤 핸들(사용자 식)은 저평가와 함께 잰 적 없음 — "
+           "관찰용, 점수 · 매수 계획에 안 들어감")
 
 
 def _f(x, nd: int = 1, sign: bool = False) -> str:
