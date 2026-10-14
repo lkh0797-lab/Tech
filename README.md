@@ -94,11 +94,13 @@ python -m chart_screener scan --years 10 --open
 
 ### 매일 자동 실행 (선택)
 
-`scan_daily.bat` 은 멈춤·브라우저 없이 실행하고 `output/daily.log` 에 기록합니다. 장 마감 후 자동 실행하려면
-명령 프롬프트에서 직접 등록하세요(경로는 본인 위치로).
+`scan_daily.bat` 은 멈춤·브라우저 없이 실행하고 `output/daily.log` 에 기록합니다. 자동 실행은 **평일 20:15** 를 권합니다 —
+네이버 일봉은 KRX + 넥스트레이드 통합 시세에 가까워 정규장(15:30) 뒤에도 애프터마켓(~20:00) 체결로 그날 값이 바뀝니다
+(일봉 캐시는 평일 20:10 뒤에 받은 것만 '확정'으로 봅니다 — `data/ohlcv.py` `DATA_FINAL`. 15:30~20:10 에 돌린 스캔은 시장 칸에
+'시간외 진행 중 — 잠정' 메모). 명령 프롬프트에서 직접 등록하세요(경로는 본인 위치로).
 
 ```bash
-schtasks /create /tn "chart_screener daily" /sc weekly /d MON,TUE,WED,THU,FRI /st 16:00 /tr "C:\경로\chart_screener\scan_daily.bat"
+schtasks /create /tn "chart_screener daily" /sc weekly /d MON,TUE,WED,THU,FRI /st 20:15 /tr "C:\경로\chart_screener\scan_daily.bat"
 ```
 
 ## 리포트 보는 법

@@ -15,7 +15,7 @@ import pandas as pd
 from . import indicators as ind
 from .config import CACHE_DIR, Config
 from .data import OHLCVCache, fetch_index, fetch_many, fetch_universe, session_fraction
-from .data.ohlcv import KST, SESSION_CLOSE, SESSION_OPEN
+from .data.ohlcv import DATA_FINAL, KST, SESSION_CLOSE, SESSION_OPEN
 from .market import MarketState, analyze_market
 from .patterns.base import StockContext
 
@@ -64,6 +64,15 @@ def partial_bar(last_date, fetched_at) -> tuple[bool, float]:
         return False, 1.0
     frac = session_fraction(at.to_pydatetime())
     return (True, frac) if frac < 1.0 else (False, 1.0)
+
+
+def after_hours_bar(last_date, fetched_at) -> bool:
+    """마지막 봉이 정규장은 끝났지만 값이 아직 잠정인가 — 마지막 봉 날짜 = 받은 날이고 평일 15:30~20:10(DATA_FINAL) 에 받았을 때.
+    네이버 일봉은 넥스트레이드 애프터마켓(~20:00) 체결로 그날 값이 바뀐다(data.ohlcv.DATA_FINAL 주석)."""
+    at = _kst(fetched_at)
+    if at is None or pd.Timestamp(last_date).date() != at.date() or at.weekday() >= 5:
+        return False
+    return SESSION_CLOSE <= at.time() < DATA_FINAL
 
 
 def _progress(i: int, n: int) -> None:
@@ -134,6 +143,8 @@ def load_universe_data(cfg: Config | None = None, *, refresh: bool = False, offl
     for m, df in index.items():
         part, frac = partial_bar(df.index[-1], fetched_at)
         market[m] = analyze_market(m, df, partial_frac=frac if part else None, breadth=breadth.get(m))
+        if after_hours_bar(df.index[-1], fetched_at) and hasattr(market[m], "notes"):
+            market[m].notes.append("시간외 진행 중 — 오늘 봉 값은 넥스트레이드 애프터마켓(~20:00) 뒤 확정(잠정 판정)")
     asof = max(d.index[-1] for d in data.values()) if data else None
     return UniverseData(uni, data, index, market, rs, asof, errors,
                         breadth=breadth, breadth_hist=breadth_hist, fetched_at=fetched_at)

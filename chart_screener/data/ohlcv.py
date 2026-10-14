@@ -27,7 +27,10 @@ _ITEM_RE = re.compile(r'data="([^"]+)"')
 
 SESSION_OPEN = time(9, 0)
 SESSION_CLOSE = time(15, 30)
-DATA_FINAL = time(15, 45)  # 종가 확정 이후 캐시를 '확정'으로 간주
+DATA_FINAL = time(20, 10)  # 이 시각 뒤에 받은 캐시를 '확정'으로 간주 (2026-10-14: 15:45 → 20:10)
+# 네이버 일봉은 KRX + 넥스트레이드 통합 시세에 가깝다 — 정규장(15:30) 뒤에도 애프터마켓(~20:00) 체결로 그날 값이 바뀐다.
+# 2026-10-13 19시에 받은 7종목이 모두 다음 날 받은 값과 달랐다(삼성전자 236,000 → 234,000; KRX 공식 종가는 232,000).
+# 15:30~20:10 에 받은 마지막 봉은 정규장 기준으론 완성이지만 값은 잠정 — after_hours_bar · 시장 칸 메모로 알린다.
 
 # 장중 누적 거래량 비율(경험적 U자형 프로파일): (경과 분, 하루 거래량 대비 누적 비율)
 _INTRADAY_PROFILE = [
@@ -57,11 +60,11 @@ def _last_final_close(at: datetime) -> datetime:
     """가장 최근 '확정 종가' 시각 (공휴일은 무시 — 무해한 재요청만 발생)."""
     d = at
     if d.weekday() < 5 and d.time() >= DATA_FINAL:
-        return d.replace(hour=15, minute=45, second=0, microsecond=0)
+        return d.replace(hour=DATA_FINAL.hour, minute=DATA_FINAL.minute, second=0, microsecond=0)
     d = d - timedelta(days=1)
     while d.weekday() >= 5:
         d -= timedelta(days=1)
-    return d.replace(hour=15, minute=45, second=0, microsecond=0)
+    return d.replace(hour=DATA_FINAL.hour, minute=DATA_FINAL.minute, second=0, microsecond=0)
 
 
 def parse_fchart(text: str) -> pd.DataFrame:
@@ -128,9 +131,9 @@ class OHLCVCache:
     def is_fresh(self, code: str, at: datetime | None = None) -> bool:
         """캐시 재사용 가능 여부 (장 상황 기준).
 
-        - 평일 장중(09:00 ≤ 지금 < 15:45): 오늘 09:00 이후에 받았고 받은 지 intraday_ttl 이내일 때만.
+        - 평일 장중 · 시간외(09:00 ≤ 지금 < DATA_FINAL 20:10): 오늘 09:00 이후에 받았고 받은 지 intraday_ttl 이내일 때만.
           (어제 장 마감 후 받은 캐시는 '확정 종가 이후'라도 오늘 장중에는 낡은 데이터다.)
-        - 그 밖(장 전·장 마감 후·주말): 가장 최근 확정 종가(15:45) 이후에 받았으면 신선.
+        - 그 밖(장 전·20:10 뒤·주말): 가장 최근 확정 시각(평일 20:10) 이후에 받았으면 신선.
         """
         p = self._path(code)
         if not p.exists():

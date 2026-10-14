@@ -99,17 +99,20 @@ def _kst(*a) -> datetime:
 
 
 @pytest.mark.parametrize("fetched, at, fresh", [
-    (_kst(2026, 10, 6, 16, 0), _kst(2026, 10, 7, 10, 0), False),   # 어제 마감 후 캐시 → 오늘 장중엔 낡음
+    # 확정 = 평일 20:10 (넥스트레이드 애프터마켓 ~20:00 뒤 — data.ohlcv.DATA_FINAL, 2026-10-14 에 15:45 에서 옮김)
+    (_kst(2026, 10, 6, 20, 30), _kst(2026, 10, 7, 10, 0), False),  # 어제 확정 후 캐시 → 오늘 장중엔 낡음
     (_kst(2026, 10, 7, 9, 50), _kst(2026, 10, 7, 10, 0), True),    # 장중 20분 이내
     (_kst(2026, 10, 7, 9, 30), _kst(2026, 10, 7, 10, 0), False),   # 장중 TTL 경과
     (_kst(2026, 10, 7, 8, 55), _kst(2026, 10, 7, 9, 5), False),    # 장 시작 전에 받은 캐시
-    (_kst(2026, 10, 7, 15, 35), _kst(2026, 10, 7, 15, 40), True),  # 15:30~15:45 도 장중 규칙
-    (_kst(2026, 10, 6, 16, 0), _kst(2026, 10, 7, 15, 40), False),
-    (_kst(2026, 10, 7, 15, 50), _kst(2026, 10, 7, 18, 0), True),   # 확정 종가 이후
-    (_kst(2026, 10, 7, 15, 0), _kst(2026, 10, 7, 18, 0), False),
-    (_kst(2026, 10, 6, 16, 0), _kst(2026, 10, 7, 8, 0), True),     # 장 전: 어제 확정 종가 이후면 신선
-    (_kst(2026, 10, 6, 15, 0), _kst(2026, 10, 7, 8, 0), False),
-    (_kst(2026, 10, 9, 16, 0), _kst(2026, 10, 10, 12, 0), True),   # 토요일: 금요일 마감 후 캐시
+    (_kst(2026, 10, 7, 15, 35), _kst(2026, 10, 7, 15, 40), True),  # 15:30~20:10 도 장중 규칙(시간외 값이 바뀐다)
+    (_kst(2026, 10, 7, 16, 0), _kst(2026, 10, 7, 18, 0), False),   # 16:00 에 받은 값은 18:00 엔 낡음(예전엔 '확정')
+    (_kst(2026, 10, 7, 19, 50), _kst(2026, 10, 7, 20, 0), True),
+    (_kst(2026, 10, 6, 20, 30), _kst(2026, 10, 7, 15, 40), False),
+    (_kst(2026, 10, 7, 20, 15), _kst(2026, 10, 7, 22, 0), True),   # 확정 이후
+    (_kst(2026, 10, 7, 19, 0), _kst(2026, 10, 7, 22, 0), False),   # 확정 전에 받은 것 — 20:10 뒤엔 다시
+    (_kst(2026, 10, 6, 20, 30), _kst(2026, 10, 7, 8, 0), True),    # 장 전: 어제 확정 이후면 신선
+    (_kst(2026, 10, 6, 16, 0), _kst(2026, 10, 7, 8, 0), False),    # 어제 16:00(시간외 중) 캐시는 낡음
+    (_kst(2026, 10, 9, 20, 30), _kst(2026, 10, 10, 12, 0), True),  # 토요일: 금요일 확정 후 캐시
 ])
 def test_cache_freshness_is_session_aware(tmp_path, fetched, at, fresh):
     cache = OHLCVCache(root=tmp_path)
@@ -117,6 +120,15 @@ def test_cache_freshness_is_session_aware(tmp_path, fetched, at, fresh):
     p.write_bytes(b"x")
     os.utime(p, (fetched.timestamp(), fetched.timestamp()))
     assert cache.is_fresh("000001", at=at) is fresh
+
+
+def test_after_hours_bar_marks_nxt_window():
+    from chart_screener.universe_data import after_hours_bar
+    d = pd.Timestamp("2026-10-07")
+    assert after_hours_bar(d, _kst(2026, 10, 7, 16, 0)) is True       # 정규장 끝 · 애프터마켓 중
+    assert after_hours_bar(d, _kst(2026, 10, 7, 20, 15)) is False     # 확정 뒤
+    assert after_hours_bar(d, _kst(2026, 10, 7, 14, 0)) is False      # 장중(미완성 봉은 partial_bar 몫)
+    assert after_hours_bar(pd.Timestamp("2026-10-06"), _kst(2026, 10, 7, 16, 0)) is False   # 마지막 봉이 어제
 
 
 def test_cache_freshness_missing_file(tmp_path):
