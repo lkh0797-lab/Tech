@@ -30,7 +30,7 @@ from . import scoring, technique_panel
 from .config import Config
 from .data import now_kst
 from .patterns import REGISTRY, PatternResult, StockContext, run_all
-from .patterns.base import FAILED
+from .patterns.base import EXTENDED, FAILED
 from .universe_data import UniverseData, iter_contexts, passes_universe_filter
 
 TOP_GROUPS = 15
@@ -209,6 +209,13 @@ def position_plan(s: StockScan, cfg: Config | None = None) -> dict | None:
         return out
     if r.stage == FAILED:
         out["plan"] = "돌파 실패 — 관망"
+        return out
+    if r.stage == EXTENDED:           # 단계가 '매수 범위 밖'인데 '돌파 확인 — 매수' 수량을 내면 서로 어긋난다
+        # 매수 범위 기준은 패턴마다 다르다(컵 앤 핸들 식 = 진입가 × 1.05, 빗각 = 돌파가 × 1.05) — 퍼센트는 패턴 이유 줄에
+        out["plan"] = (f"이격 과다 — 추격 매수 안 함 ({at} {close:,.0f} · 피벗 {pivot:,.0f} · 패턴의 매수 범위 밖) "
+                       f"· 피벗 쪽으로 눌리면 다시 계산 — 눌림 대기")
+        if eod:
+            out["plan"] += " · 장중 — 이 기법은 완성 봉으로만 판정(오늘 미완성 봉 안 씀)"
         return out
     hold = scoring.plan_hold(r)       # 기법상 아직 사지 않는 상태 (빗각 거래량 미달 돌파 · 안착 확인 대기)
     if hold:

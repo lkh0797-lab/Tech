@@ -112,6 +112,10 @@ def test_position_plan_texts():
     assert p["entry"] == 10300 and p["plan"].startswith("돌파 확인")
     assert _stock({CWH: _base(bo="2026-10-01")}, close=9900).position["plan"] == "피벗 10,000 재돌파 매수"
     assert _stock({CWH: _base(stage=FAILED, bo="2026-10-01")}, close=9500).position["plan"] == "돌파 실패 — 관망"
+    # 이격 과다(매수 범위 밖) 단계에 '돌파 확인 — 매수' 수량을 내지 않는다 — 눌림 대기
+    p = _stock({CWH: _base(stage=EXTENDED, bo="2026-10-01", stop=9800)}, close=10600).position
+    assert p["plan"].startswith("이격 과다 — 추격 매수 안 함") and "눌림 대기" in p["plan"]
+    assert p["shares"] == 0 and p["cap"] is None
     # 돌파 후 손절가 아래로 밀렸으면 관망
     assert _stock({CWH: _base(bo="2026-10-01")}, close=9200).position["plan"] == "손절가 이탈 — 관망"
     # 돌파 전 형성 중: 지금 가격이 손절가 아래여도 피벗 역지정가 매수 계획은 유효
